@@ -121,3 +121,35 @@ def daily_sport_and_trimp(
         if sport != "rest":
             day["trimp"] += banister_trimp(act["duration_min"], act["hr_avg"], hr_rest, hr_max, sex)
     return out
+
+
+def classify_missingness(df: pd.DataFrame, *, columns=("ln_rmssd", "rhr")) -> pd.DataFrame:
+    """Annotate non-wear / missing days: add ``<col>_missing`` booleans and a
+    ``missing_any`` flag. Labeling only — the MCAR-vs-MAR probe is separate."""
+    out = df.copy()
+    for c in columns:
+        out[f"{c}_missing"] = out[c].isna()
+    flags = [f"{c}_missing" for c in columns]
+    out["missing_any"] = out[flags].any(axis=1)
+    return out
+
+
+def missingness_diagnostic(df: pd.DataFrame, *, predictor="trimp", target="ln_rmssd") -> dict:
+    """Crude MCAR probe: does ``target`` missingness depend on ``predictor``? Compares the
+    predictor's mean on missing vs present days; flags ``suspect_mar`` when the gap
+    exceeds half a standard deviation. A signal that missingness may be MAR (not
+    completely at random) — not a formal test."""
+    miss = df[target].isna()
+    if miss.sum() == 0 or (~miss).sum() == 0:
+        return {
+            "mean_when_missing": float("nan"),
+            "mean_when_present": float("nan"),
+            "suspect_mar": False,
+        }
+    a = float(df.loc[miss, predictor].mean())
+    b = float(df.loc[~miss, predictor].mean())
+    return {
+        "mean_when_missing": a,
+        "mean_when_present": b,
+        "suspect_mar": bool(abs(a - b) > 0.5 * df[predictor].std()),
+    }

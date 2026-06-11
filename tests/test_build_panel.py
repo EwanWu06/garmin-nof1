@@ -6,9 +6,11 @@ from garmin_nof1.models import fit_recovery_cost
 from garmin_nof1.pipeline.build_panel import (
     SCHEMA_COLUMNS,
     assemble_panel,
+    classify_missingness,
     daily_sport_and_trimp,
     ln_rmssd_from_rmssd,
     map_sport,
+    missingness_diagnostic,
 )
 from garmin_nof1.pipeline.trimp import banister_trimp
 
@@ -120,3 +122,52 @@ def test_daily_fold_priority_soccer_and_sums_trimp():
     assert abs(d1["trimp"] - expected) < 1e-9
     d2 = folded["2024-05-02"]
     assert d2["sport"] == "rest" and d2["trimp"] == 0.0  # only unmodeled activity
+
+
+def test_classify_missingness_flags_nonwear():
+    df = assemble_panel(
+        [
+            {
+                "date": "2024-01-01",
+                "sport": "rest",
+                "trimp": 0.0,
+                "sleep_hours": 7.5,
+                "rhr": 50.0,
+                "ln_rmssd": np.log(55.0),
+            },
+            {
+                "date": "2024-01-02",
+                "sport": "rest",
+                "trimp": 0.0,
+                "sleep_hours": np.nan,
+                "rhr": np.nan,
+                "ln_rmssd": np.nan,
+            },
+        ]
+    )
+    out = classify_missingness(df)
+    assert out["ln_rmssd_missing"].tolist() == [False, True]
+    assert out["missing_any"].tolist() == [False, True]
+
+
+def test_missingness_diagnostic_detects_load_dependence():
+    # Construct missingness that depends on trimp (MAR, not MCAR): hard days drop HRV.
+    rng = np.random.default_rng(1)
+    recs = []
+    for i in range(200):
+        trimp = float(rng.uniform(0, 200))
+        ln = np.nan if trimp > 150 else float(rng.normal(4.0, 0.1))  # missing on hard days
+        recs.append(
+            {
+                "date": pd.Timestamp("2023-01-01") + pd.Timedelta(days=i),
+                "sport": "triathlon",
+                "trimp": trimp,
+                "sleep_hours": 7.5,
+                "rhr": 50.0,
+                "ln_rmssd": ln,
+            }
+        )
+    df = assemble_panel(recs)
+    diag = missingness_diagnostic(df, predictor="trimp", target="ln_rmssd")
+    assert diag["suspect_mar"] is True
+    assert diag["mean_when_missing"] > diag["mean_when_present"]
