@@ -14,6 +14,7 @@ I/O lives in the thin adapter at the bottom (lazy fitparse import).
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -59,3 +60,42 @@ def mean_hr(rr_ms) -> float:
     if rr.size < 1:
         raise ValueError("need >= 1 RR interval for mean HR")
     return float(60_000.0 / np.mean(rr))
+
+
+def filter_artifacts(rr_ms, threshold: float = 0.2) -> np.ndarray:
+    """Drop beats whose interval differs from the previous *accepted* beat by more than
+    ``threshold`` (fractional) — a simple ectopic/artifact filter. Documented as a crude
+    cleaner; the D layer reports how many beats it removed (``n_artifacts_removed``)."""
+    rr = np.asarray(rr_ms, dtype=float)
+    if rr.size == 0:
+        return rr
+    kept = [float(rr[0])]
+    for x in rr[1:]:
+        if abs(x - kept[-1]) <= threshold * kept[-1]:
+            kept.append(float(x))
+    return np.asarray(kept, dtype=float)
+
+
+@dataclass(frozen=True)
+class HrvMetrics:
+    """Short-term HRV metrics reconstructed from RR intervals (ms)."""
+
+    rmssd: float
+    sdnn: float
+    mean_hr: float
+    n_beats: int
+    n_artifacts_removed: int
+
+
+def metrics_from_rr(rr_ms, *, correct_artifacts: bool = True) -> HrvMetrics:
+    """Compute HRV metrics, optionally after the artifact filter."""
+    rr = np.asarray(rr_ms, dtype=float)
+    n_raw = int(rr.size)
+    rr_use = filter_artifacts(rr) if correct_artifacts else rr
+    return HrvMetrics(
+        rmssd=rmssd(rr_use),
+        sdnn=sdnn(rr_use),
+        mean_hr=mean_hr(rr_use),
+        n_beats=int(rr_use.size),
+        n_artifacts_removed=n_raw - int(rr_use.size),
+    )
