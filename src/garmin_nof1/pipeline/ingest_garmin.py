@@ -44,7 +44,16 @@ def with_backoff(
 
 
 def archive_raw(payload, name: str, raw_dir, date_str: str) -> Path:
-    """Write ``payload`` (JSON-serializable) to ``<raw_dir>/<name>-<date_str>.json``."""
+    """Write ``payload`` (JSON-serializable) to ``<raw_dir>/<name>-<date_str>.json``.
+
+    Archiving every raw API response means the processing pipeline can be re-run
+    entirely offline and the exact data returned by Garmin Connect is preserved for
+    audit and reproducibility — matching the rationale in the module docstring.
+
+    The filename is built directly from ``name`` and ``date_str``.  This is
+    intentional: the module is a single-user personal tool with no untrusted-input
+    surface, so there is no path-traversal risk worth guarding against here.
+    """
     raw_dir = Path(raw_dir)
     raw_dir.mkdir(parents=True, exist_ok=True)
     path = raw_dir / f"{name}-{date_str}.json"

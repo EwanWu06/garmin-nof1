@@ -1,4 +1,5 @@
 import json
+from unittest.mock import Mock
 
 import pytest
 
@@ -12,6 +13,7 @@ from garmin_nof1.pipeline.ingest_garmin import (
 
 def test_with_backoff_retries_then_succeeds():
     calls = {"n": 0}
+    sleep = Mock()
 
     def flaky():
         calls["n"] += 1
@@ -19,16 +21,21 @@ def test_with_backoff_retries_then_succeeds():
             raise RuntimeError("429 rate limited")
         return 42
 
-    result = with_backoff(flaky, retries=5, sleep=lambda *_: None)
+    result = with_backoff(flaky, retries=5, sleep=sleep)
     assert result == 42 and calls["n"] == 3
+    assert sleep.call_count == 2  # two failures → two sleeps before the third success
 
 
 def test_with_backoff_reraises_after_exhausting():
+    calls = {"n": 0}
+
     def always_fail():
+        calls["n"] += 1
         raise RuntimeError("nope")
 
     with pytest.raises(RuntimeError):
         with_backoff(always_fail, retries=3, sleep=lambda *_: None)
+    assert calls["n"] == 3  # tried all 3 attempts
 
 
 def test_archive_raw_writes_json(tmp_path):
