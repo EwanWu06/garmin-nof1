@@ -124,3 +124,10 @@ def test_activity_record_without_session_or_hrv():
     fit = _FakeFitFile([_FakeMsg("record", {"heart_rate": 120})])
     rec = activity_record_from_fitfile(fit)
     assert rec.sport is None and rec.rr_ms.size == 0 and rec.metrics is None
+
+
+def test_adapter_sets_metrics_none_when_filter_exhausts_beats():
+    # raw has 2 beats but the second is an artifact -> filter leaves 1 -> metrics None
+    fit = _FakeFitFile([_FakeMsg("hrv", {"time": [0.800, 2.000]})])
+    rec = activity_record_from_fitfile(fit, correct_artifacts=True)
+    assert rec.rr_ms.size == 2 and rec.metrics is None

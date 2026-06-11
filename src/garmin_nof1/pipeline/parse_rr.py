@@ -14,7 +14,7 @@ I/O lives in the thin adapter at the bottom (lazy fitparse import).
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -150,33 +150,79 @@ def metrics_from_rr(rr_ms, *, correct_artifacts: bool = True) -> HrvMetrics:
 
 @dataclass(frozen=True)
 class ActivityRecord:
-    """Parsed activity: session metadata + reconstructed RR and HRV metrics."""
+    """Parsed activity: session metadata + reconstructed RR and HRV metrics.
+
+    Equality and hashing are over the scalar metadata fields only (``start_time``,
+    ``sport``, ``hr_avg``, ``duration_min``, ``metrics``); the ``rr_ms`` ndarray
+    is excluded because ndarray ``__eq__`` returns an array rather than a bool.
+
+    Fields
+    ------
+    start_time : object | None
+        Session start timestamp, as fitparse yields it.
+    sport : str | None
+        Raw FIT sport key (e.g. ``"running"``, ``"soccer"``).
+    hr_avg : int | float | None
+        Average heart rate for the session, in bpm. FIT ``avg_heart_rate`` is
+        typically an int, but floats are accepted.
+    duration_min : float | None
+        Session duration in minutes, derived from ``total_timer_time``.
+    rr_ms : np.ndarray
+        Beat-to-beat R-R intervals in milliseconds (beat order preserved).
+        Excluded from equality/hash comparisons.
+    metrics : HrvMetrics | None
+        HRV metrics computed from ``rr_ms``, or ``None`` when fewer than 2
+        usable beats remain after artifact filtering.
+    """
 
     start_time: object | None
     sport: str | None
-    hr_avg: float | None
+    hr_avg: int | float | None
     duration_min: float | None
-    rr_ms: np.ndarray
+    rr_ms: np.ndarray = field(compare=False, hash=False, repr=False)
     metrics: HrvMetrics | None
 
 
 def activity_record_from_fitfile(fitfile, *, correct_artifacts: bool = True) -> ActivityRecord:
-    """Build an ActivityRecord from an opened fitparse-like file (anything exposing
-    ``get_messages(name)`` whose messages expose ``get_value(field)``). Kept separate
-    from disk I/O so it is testable with a fake fitfile — no real .fit fixtures."""
+    """Build an :class:`ActivityRecord` from an opened fitparse-like file.
+
+    Kept separate from disk I/O so it is testable with a fake fitfile — no real
+    .fit fixtures needed.
+
+    Parameters
+    ----------
+    fitfile:
+        Opened fitparse-like object exposing ``get_messages(name)`` (returns an
+        iterable of message objects) where each message exposes
+        ``get_value(field)``.
+    correct_artifacts:
+        Passed through to :func:`metrics_from_rr`. When ``True`` (default),
+        the artifact filter is applied before computing HRV metrics.
+
+    Returns
+    -------
+    ActivityRecord
+        Parsed session metadata, raw RR intervals, and (when available) HRV
+        metrics. ``metrics`` is ``None`` when fewer than 2 usable beats remain
+        after artifact filtering.
+    """
     hrv_arrays = [m.get_value("time") for m in fitfile.get_messages("hrv")]
     rr_ms = reconstruct_rr_ms(hrv_arrays)
 
     session = next(iter(fitfile.get_messages("session")), None)
 
-    def _sess(field):
-        return session.get_value(field) if session is not None else None
+    def _sess(f):
+        return session.get_value(f) if session is not None else None
 
     total_s = _sess("total_timer_time")
     duration_min = float(total_s) / 60.0 if total_s is not None else None
-    metrics = (
-        metrics_from_rr(rr_ms, correct_artifacts=correct_artifacts) if rr_ms.size >= 2 else None
-    )
+    metrics = None
+    if rr_ms.size >= 2:
+        try:
+            metrics = metrics_from_rr(rr_ms, correct_artifacts=correct_artifacts)
+        except ValueError:
+            # artifact filtering can leave <2 usable beats on very arrhythmic data
+            metrics = None
     return ActivityRecord(
         start_time=_sess("start_time"),
         sport=_sess("sport"),
