@@ -14,13 +14,14 @@ def test_reconstruct_flattens_drops_none_and_scales_to_ms():
 
 def test_reconstruct_handles_scalar_and_empty():
     assert reconstruct_rr_ms([]).size == 0
-    assert np.allclose(reconstruct_rr_ms([0.9]), [900.0])  # scalar tolerated
+    # arr=0.9 (bare float) hits the scalar branch
+    assert np.allclose(reconstruct_rr_ms([0.9]), [900.0])
 
 
 def test_rmssd_matches_known_definition():
     rr = np.array([800.0, 810.0, 790.0, 805.0])
-    expected = float(np.sqrt(np.mean(np.diff(rr) ** 2)))
-    assert abs(rmssd(rr) - expected) < 1e-9
+    # diffs [10, -20, 15]; mean([100, 400, 225]) = 241.6667; sqrt = 15.5456...
+    assert abs(rmssd(rr) - 15.5456317551) < 1e-6
 
 
 def test_rmssd_recovers_synthetic_target():
@@ -36,4 +37,8 @@ def test_sdnn_and_mean_hr():
 
 def test_metrics_require_enough_beats():
     with pytest.raises(ValueError):
-        rmssd([800.0])
+        rmssd([800.0])  # needs >= 2
+    with pytest.raises(ValueError):
+        sdnn([800.0])  # needs >= 2
+    with pytest.raises(ValueError):
+        mean_hr([])  # needs >= 1

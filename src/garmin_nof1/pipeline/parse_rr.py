@@ -18,7 +18,9 @@ from collections.abc import Iterable, Sequence
 import numpy as np
 
 
-def reconstruct_rr_ms(hrv_time_arrays: Iterable[Sequence[float] | float | None]) -> np.ndarray:
+def reconstruct_rr_ms(
+    hrv_time_arrays: Iterable[Sequence[float | None] | float | None],
+) -> np.ndarray:
     """Flatten fitparse `hrv`-message `time` values into a flat RR array in milliseconds.
 
     Each element is one message's `time` value: a list of up to 5 intervals in seconds
@@ -36,6 +38,7 @@ def reconstruct_rr_ms(hrv_time_arrays: Iterable[Sequence[float] | float | None])
 def rmssd(rr_ms) -> float:
     """Root mean square of successive RR differences (ms)."""
     rr = np.asarray(rr_ms, dtype=float)
+    # np.diff of a single value is empty; np.mean([]) would return nan rather than raising.
     if rr.size < 2:
         raise ValueError("need >= 2 RR intervals for RMSSD")
     return float(np.sqrt(np.mean(np.diff(rr) ** 2)))
@@ -44,6 +47,7 @@ def rmssd(rr_ms) -> float:
 def sdnn(rr_ms) -> float:
     """Standard deviation of RR intervals (ms, sample SD)."""
     rr = np.asarray(rr_ms, dtype=float)
+    # np.diff of a single value is empty; np.mean([]) would return nan rather than raising.
     if rr.size < 2:
         raise ValueError("need >= 2 RR intervals for SDNN")
     return float(np.std(rr, ddof=1))
