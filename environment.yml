@@ -1,0 +1,32 @@
+# Reproducible environment for the Garmin dual-sport N-of-1 project.
+#
+#   mamba env create -f environment.yml      (or: conda env create -f environment.yml)
+#   conda activate garmin-nof1
+#
+# Core scientific stack only. Heavier/optional dependencies for later phases are
+# listed (commented) at the bottom — install them when you reach that phase so a
+# flaky optional package never blocks the core pipeline + validation scaffold.
+name: garmin-nof1
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - statsmodels
+  - matplotlib
+  - pyarrow            # parquet I/O for the daily panel
+  - pytest
+  - pytest-cov
+  - ruff               # lint/format
+  - pip
+  - pip:
+      - fitparse        # parse activity FIT files (chest-strap RR / hrv messages)
+      - garminconnect   # unofficial Garmin Connect private-API client (daily panel)
+# ── Optional, per phase (install when needed) ────────────────────────────────
+#   Phase 0  ingest:   garmindb            # Garmin Connect -> SQLite (alt to garminconnect)
+#   Phase 3  modeling: pymc  arviz         # Bayesian within-person hierarchical model
+#   Phase 5  coupling: tigramite           # PCMCI+ causal discovery
+#                      timeseriescv        # de Prado purged/embargoed CV (reference impl)
