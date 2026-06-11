@@ -3,7 +3,13 @@ import pandas as pd
 import pytest
 
 from garmin_nof1.models import fit_recovery_cost
-from garmin_nof1.pipeline.build_panel import SCHEMA_COLUMNS, assemble_panel, ln_rmssd_from_rmssd
+from garmin_nof1.pipeline.build_panel import (
+    SCHEMA_COLUMNS,
+    assemble_panel,
+    daily_sport_and_trimp,
+    ln_rmssd_from_rmssd,
+    map_sport,
+)
 
 
 def test_ln_rmssd_handles_missing():
@@ -90,3 +96,25 @@ def test_assemble_panel_rejects_duplicate_dates():
     ]
     with pytest.raises(ValueError, match="duplicate dates"):
         assemble_panel(records)
+
+
+def test_map_sport_groups_endurance_and_soccer():
+    assert map_sport("running") == "triathlon"
+    assert map_sport("lap_swimming") == "triathlon"
+    assert map_sport("road_biking") == "triathlon"
+    assert map_sport("soccer") == "soccer"
+    assert map_sport("strength_training") == "rest"  # unmodeled -> no session
+
+
+def test_daily_fold_priority_soccer_and_sums_trimp():
+    activities = [
+        {"date": "2024-05-01", "sport_key": "running", "hr_avg": 150, "duration_min": 60},
+        {"date": "2024-05-01", "sport_key": "soccer", "hr_avg": 160, "duration_min": 90},
+        {"date": "2024-05-02", "sport_key": "strength_training", "hr_avg": 110, "duration_min": 40},
+    ]
+    folded = daily_sport_and_trimp(activities, hr_rest=50, hr_max=200, sex="M")
+    d1 = folded["2024-05-01"]
+    assert d1["sport"] == "soccer"  # soccer wins the day's label
+    assert d1["trimp"] > 0  # sum of modeled-session Banister TRIMP
+    d2 = folded["2024-05-02"]
+    assert d2["sport"] == "rest" and d2["trimp"] == 0.0  # only unmodeled activity

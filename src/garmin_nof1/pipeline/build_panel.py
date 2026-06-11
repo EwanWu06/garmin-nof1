@@ -17,6 +17,8 @@ from collections.abc import Iterable
 import numpy as np
 import pandas as pd
 
+from garmin_nof1.pipeline.trimp import banister_trimp
+
 SCHEMA_COLUMNS = ["date", "sport", "trimp", "sleep_hours", "rhr", "ln_rmssd", "hrv_observed"]
 _SPORT_CATEGORIES = ["rest", "triathlon", "soccer"]
 
@@ -63,3 +65,51 @@ def assemble_panel(records: Iterable[dict], *, start=None, end=None) -> pd.DataF
     df["sport"] = pd.Categorical(df["sport"], categories=_SPORT_CATEGORIES)
     df["hrv_observed"] = df["ln_rmssd"].notna()
     return df[SCHEMA_COLUMNS]
+
+
+# Garmin activityType.typeKey -> modeled sport. Endurance triathlon disciplines collapse
+# to "triathlon"; soccer/football to "soccer"; everything else is an unmodeled session
+# that contributes no triathlon/soccer load (treated as "rest" for the panel label).
+_SPORT_MAP = {
+    "running": "triathlon",
+    "track_running": "triathlon",
+    "trail_running": "triathlon",
+    "treadmill_running": "triathlon",
+    "cycling": "triathlon",
+    "road_biking": "triathlon",
+    "indoor_cycling": "triathlon",
+    "mountain_biking": "triathlon",
+    "virtual_ride": "triathlon",
+    "swimming": "triathlon",
+    "lap_swimming": "triathlon",
+    "open_water_swimming": "triathlon",
+    "soccer": "soccer",
+    "football": "soccer",
+}
+
+
+def map_sport(activity_type_key) -> str:
+    """Map a Garmin activityType key to {triathlon, soccer, rest}."""
+    return _SPORT_MAP.get(str(activity_type_key).lower(), "rest")
+
+
+def daily_sport_and_trimp(
+    activities: Iterable[dict], hr_rest: float, hr_max: float, sex: str = "M"
+) -> dict[str, dict]:
+    """Fold per-activity summaries into per-day ``{date: {"sport", "trimp"}}``.
+
+    The day's label is the highest-priority modeled sport present (soccer > triathlon >
+    rest); ``trimp`` sums Banister TRIMP over the day's modeled (triathlon/soccer)
+    sessions. Each activity dict needs ``date, sport_key, hr_avg, duration_min``.
+    """
+    priority = {"rest": 0, "triathlon": 1, "soccer": 2}
+    out: dict[str, dict] = {}
+    for act in activities:
+        date = str(act["date"])
+        sport = map_sport(act["sport_key"])
+        day = out.setdefault(date, {"sport": "rest", "trimp": 0.0})
+        if priority[sport] > priority[day["sport"]]:
+            day["sport"] = sport
+        if sport != "rest":
+            day["trimp"] += banister_trimp(act["duration_min"], act["hr_avg"], hr_rest, hr_max, sex)
+    return out
