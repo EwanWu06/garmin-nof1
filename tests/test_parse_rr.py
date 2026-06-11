@@ -3,7 +3,9 @@ import pytest
 
 from garmin_nof1.data.synthetic import make_rr_series
 from garmin_nof1.pipeline.parse_rr import (
+    ActivityRecord,
     HrvMetrics,
+    activity_record_from_fitfile,
     filter_artifacts,
     mean_hr,
     metrics_from_rr,
@@ -73,3 +75,52 @@ def test_metrics_from_rr_reports_removed_count():
 def test_metrics_from_rr_raises_when_too_few_beats_after_filter():
     with pytest.raises(ValueError, match="remain after artifact filtering"):
         metrics_from_rr(np.array([800.0, 2000.0]))
+
+
+class _FakeMsg:
+    def __init__(self, name, values):
+        self.name = name
+        self._values = values
+
+    def get_value(self, field, fallback=None):
+        return self._values.get(field, fallback)
+
+
+class _FakeFitFile:
+    """Mimics the slice of fitparse.FitFile that the adapter uses."""
+
+    def __init__(self, messages):
+        self._messages = messages
+
+    def get_messages(self, name):
+        return [m for m in self._messages if m.name == name]
+
+
+def test_activity_record_from_fitfile_extracts_rr_and_session():
+    fit = _FakeFitFile(
+        [
+            _FakeMsg("hrv", {"time": [0.800, 0.810, None]}),
+            _FakeMsg("hrv", {"time": [0.795, 0.805]}),
+            _FakeMsg(
+                "session",
+                {
+                    "sport": "soccer",
+                    "start_time": "2024-05-01T18:00:00",
+                    "avg_heart_rate": 150,
+                    "total_timer_time": 3600.0,
+                },
+            ),
+        ]
+    )
+    rec = activity_record_from_fitfile(fit, correct_artifacts=False)
+    assert isinstance(rec, ActivityRecord)
+    assert rec.sport == "soccer" and rec.hr_avg == 150
+    assert abs(rec.duration_min - 60.0) < 1e-9
+    assert np.allclose(rec.rr_ms, [800.0, 810.0, 795.0, 805.0])
+    assert rec.metrics is not None and rec.metrics.n_beats == 4
+
+
+def test_activity_record_without_session_or_hrv():
+    fit = _FakeFitFile([_FakeMsg("record", {"heart_rate": 120})])
+    rec = activity_record_from_fitfile(fit)
+    assert rec.sport is None and rec.rr_ms.size == 0 and rec.metrics is None

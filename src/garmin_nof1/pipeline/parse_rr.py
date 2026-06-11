@@ -146,3 +146,54 @@ def metrics_from_rr(rr_ms, *, correct_artifacts: bool = True) -> HrvMetrics:
         n_beats=int(rr_use.size),
         n_artifacts_removed=n_raw - int(rr_use.size),
     )
+
+
+@dataclass(frozen=True)
+class ActivityRecord:
+    """Parsed activity: session metadata + reconstructed RR and HRV metrics."""
+
+    start_time: object | None
+    sport: str | None
+    hr_avg: float | None
+    duration_min: float | None
+    rr_ms: np.ndarray
+    metrics: HrvMetrics | None
+
+
+def activity_record_from_fitfile(fitfile, *, correct_artifacts: bool = True) -> ActivityRecord:
+    """Build an ActivityRecord from an opened fitparse-like file (anything exposing
+    ``get_messages(name)`` whose messages expose ``get_value(field)``). Kept separate
+    from disk I/O so it is testable with a fake fitfile — no real .fit fixtures."""
+    hrv_arrays = [m.get_value("time") for m in fitfile.get_messages("hrv")]
+    rr_ms = reconstruct_rr_ms(hrv_arrays)
+
+    session = next(iter(fitfile.get_messages("session")), None)
+
+    def _sess(field):
+        return session.get_value(field) if session is not None else None
+
+    total_s = _sess("total_timer_time")
+    duration_min = float(total_s) / 60.0 if total_s is not None else None
+    metrics = (
+        metrics_from_rr(rr_ms, correct_artifacts=correct_artifacts) if rr_ms.size >= 2 else None
+    )
+    return ActivityRecord(
+        start_time=_sess("start_time"),
+        sport=_sess("sport"),
+        hr_avg=_sess("avg_heart_rate"),
+        duration_min=duration_min,
+        rr_ms=rr_ms,
+        metrics=metrics,
+    )
+
+
+def parse_activity_fit(path, *, correct_artifacts: bool = True) -> ActivityRecord:
+    """Open an activity FIT and parse it. Lazy fitparse import keeps the pure logic
+    (and its tests) free of the fitparse dependency.
+
+    Unit pitfalls when reading other FIT fields later: latitude/longitude are
+    *semicircles* (value * 180 / 2**31 -> degrees); altitude uses scale 5 / offset 500.
+    """
+    from fitparse import FitFile  # lazy
+
+    return activity_record_from_fitfile(FitFile(str(path)), correct_artifacts=correct_artifacts)
