@@ -135,10 +135,21 @@ def classify_missingness(df: pd.DataFrame, *, columns=("ln_rmssd", "rhr")) -> pd
 
 
 def missingness_diagnostic(df: pd.DataFrame, *, predictor="trimp", target="ln_rmssd") -> dict:
-    """Crude MCAR probe: does ``target`` missingness depend on ``predictor``? Compares the
-    predictor's mean on missing vs present days; flags ``suspect_mar`` when the gap
-    exceeds half a standard deviation. A signal that missingness may be MAR (not
-    completely at random) — not a formal test."""
+    """Crude MCAR probe: does ``target`` missingness depend on ``predictor``?
+
+    Compares the predictor's mean on missing vs present days and flags
+    ``suspect_mar`` when the gap exceeds ``0.5 × std(predictor)`` computed
+    over **all rows** — an arbitrary heuristic, not a formal statistical test
+    and not calibrated to sample size.
+
+    NaN values in the predictor column are excluded from group means (pandas
+    ``skipna`` default behaviour).
+
+    Raises ``KeyError`` if ``predictor`` or ``target`` is absent from ``df``.
+
+    A positive flag means the pattern *warrants investigation* before any
+    imputation decision — it does not prove the data are MAR.
+    """
     miss = df[target].isna()
     if miss.sum() == 0 or (~miss).sum() == 0:
         return {
@@ -148,6 +159,8 @@ def missingness_diagnostic(df: pd.DataFrame, *, predictor="trimp", target="ln_rm
         }
     a = float(df.loc[miss, predictor].mean())
     b = float(df.loc[~miss, predictor].mean())
+    if np.isnan(a) or np.isnan(b):
+        return {"mean_when_missing": a, "mean_when_present": b, "suspect_mar": False}
     return {
         "mean_when_missing": a,
         "mean_when_present": b,

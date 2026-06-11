@@ -147,7 +147,30 @@ def test_classify_missingness_flags_nonwear():
     )
     out = classify_missingness(df)
     assert out["ln_rmssd_missing"].tolist() == [False, True]
+    assert out["rhr_missing"].tolist() == [False, True]
     assert out["missing_any"].tolist() == [False, True]
+
+
+def test_missingness_diagnostic_mcar_does_not_cry_wolf():
+    # missingness independent of trimp (MCAR) -> the diagnostic must NOT flag MAR
+    rng = np.random.default_rng(2)
+    recs = []
+    for i in range(300):
+        trimp = float(rng.uniform(0, 200))
+        ln = np.nan if rng.random() < 0.1 else float(rng.normal(4.0, 0.1))
+        recs.append(
+            {
+                "date": pd.Timestamp("2023-01-01") + pd.Timedelta(days=i),
+                "sport": "triathlon",
+                "trimp": trimp,
+                "sleep_hours": 7.5,
+                "rhr": 50.0,
+                "ln_rmssd": ln,
+            }
+        )
+    df = assemble_panel(recs)
+    diag = missingness_diagnostic(df, predictor="trimp", target="ln_rmssd")
+    assert diag["suspect_mar"] is False
 
 
 def test_missingness_diagnostic_detects_load_dependence():
