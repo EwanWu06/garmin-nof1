@@ -68,3 +68,8 @@ def test_metrics_from_rr_reports_removed_count():
     assert isinstance(m, HrvMetrics)
     assert m.n_beats == 3 and m.n_artifacts_removed == 1
     assert m.rmssd > 0 and m.sdnn >= 0 and 40.0 < m.mean_hr < 90.0
+
+
+def test_metrics_from_rr_raises_when_too_few_beats_after_filter():
+    with pytest.raises(ValueError, match="remain after artifact filtering"):
+        metrics_from_rr(np.array([800.0, 2000.0]))

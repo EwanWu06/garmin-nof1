@@ -65,7 +65,12 @@ def mean_hr(rr_ms) -> float:
 def filter_artifacts(rr_ms, threshold: float = 0.2) -> np.ndarray:
     """Drop beats whose interval differs from the previous *accepted* beat by more than
     ``threshold`` (fractional) — a simple ectopic/artifact filter. Documented as a crude
-    cleaner; the D layer reports how many beats it removed (``n_artifacts_removed``)."""
+    cleaner; the D layer reports how many beats it removed (``n_artifacts_removed``).
+
+    The threshold is *fractional/relative* (not absolute) because a safe window must scale
+    with the RR baseline: an 800 ms beat and a 400 ms beat need different absolute
+    tolerances for the same physiological deviation to be flagged consistently.
+    """
     rr = np.asarray(rr_ms, dtype=float)
     if rr.size == 0:
         return rr
@@ -78,7 +83,22 @@ def filter_artifacts(rr_ms, threshold: float = 0.2) -> np.ndarray:
 
 @dataclass(frozen=True)
 class HrvMetrics:
-    """Short-term HRV metrics reconstructed from RR intervals (ms)."""
+    """Short-term HRV metrics reconstructed from RR intervals.
+
+    Fields
+    ------
+    rmssd : float
+        Root mean square of successive RR differences, in milliseconds.
+    sdnn : float
+        Standard deviation of RR intervals (sample SD), in milliseconds.
+    mean_hr : float
+        Mean heart rate implied by the RR intervals, in beats per minute (bpm).
+    n_beats : int
+        Number of beats used to compute the metrics (after artifact removal).
+    n_artifacts_removed : int
+        Count of beats removed by the artifact filter (0 when
+        ``correct_artifacts=False``).
+    """
 
     rmssd: float
     sdnn: float
@@ -88,10 +108,37 @@ class HrvMetrics:
 
 
 def metrics_from_rr(rr_ms, *, correct_artifacts: bool = True) -> HrvMetrics:
-    """Compute HRV metrics, optionally after the artifact filter."""
+    """Compute HRV metrics from a sequence of RR intervals, optionally after artifact filtering.
+
+    Parameters
+    ----------
+    rr_ms:
+        RR intervals in **milliseconds**.
+    correct_artifacts:
+        When ``True`` (default), run :func:`filter_artifacts` before computing
+        metrics.  Pass ``False`` to skip filtering, which is useful for auditing
+        raw data or comparing corrected vs. uncorrected values.
+
+    Returns
+    -------
+    HrvMetrics
+        Dataclass with ``rmssd``, ``sdnn``, ``mean_hr`` (see field docs for units),
+        ``n_beats`` (beats used after filtering), and ``n_artifacts_removed``
+        (beats dropped by the filter; 0 when ``correct_artifacts=False``).
+
+    Raises
+    ------
+    ValueError
+        If fewer than 2 beats remain after artifact filtering.
+    """
     rr = np.asarray(rr_ms, dtype=float)
     n_raw = int(rr.size)
     rr_use = filter_artifacts(rr) if correct_artifacts else rr
+    if rr_use.size < 2:
+        raise ValueError(
+            f"metrics_from_rr: only {rr_use.size} beat(s) remain after artifact "
+            f"filtering ({n_raw - int(rr_use.size)} removed); need >= 2"
+        )
     return HrvMetrics(
         rmssd=rmssd(rr_use),
         sdnn=sdnn(rr_use),
