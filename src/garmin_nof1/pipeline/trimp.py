@@ -24,13 +24,19 @@ def banister_trimp(
     if hr_max <= hr_rest:
         raise ValueError("hr_max must exceed hr_rest")
     hrr = max(0.0, (hr_avg - hr_rest) / (hr_max - hr_rest))
-    a, b = _BANISTER[sex.upper()]
+    key = sex.upper()
+    if key not in _BANISTER:
+        raise ValueError(f"sex must be one of {list(_BANISTER)}; got {sex!r}")
+    a, b = _BANISTER[key]
     return float(duration_min * hrr * a * math.exp(b * hrr))
 
 
 def edwards_trimp(time_in_zones_min: Sequence[float]) -> float:
     """Edwards summated heart-rate-zone load: minutes in zone *i* weighted by *i*
-    (zones numbered 1..n in order)."""
+    (zones numbered 1..n in order).
+
+    Zones are ordered low→high so zone *i* carries weight *i* (higher zones cost more).
+    No floor is needed because time-in-zone is non-negative by construction."""
     return float(sum((i + 1) * t for i, t in enumerate(time_in_zones_min)))
 
 

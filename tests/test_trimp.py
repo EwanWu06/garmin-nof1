@@ -38,3 +38,19 @@ def test_trimp_variants_includes_requested():
     )
     assert set(out) == {"banister", "edwards", "garmin"}
     assert out["garmin"] == 88.0
+
+
+def test_banister_female_constants():
+    # Female path uses (a, b) = (0.86, 1.67); guards against swapping the constants.
+    hrr = (150 - 50) / (200 - 50)
+    expected = 60.0 * hrr * 0.86 * math.exp(1.67 * hrr)
+    assert abs(banister_trimp(60.0, 150.0, 50.0, 200.0, "F") - expected) < 1e-6
+
+
+def test_banister_rejects_unknown_sex():
+    with pytest.raises(ValueError, match="sex must be one of"):
+        banister_trimp(60.0, 150.0, 50.0, 200.0, sex="X")
+
+
+def test_edwards_empty_zones():
+    assert edwards_trimp([]) == 0.0
