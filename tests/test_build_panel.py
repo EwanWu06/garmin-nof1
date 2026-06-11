@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from garmin_nof1.models import fit_recovery_cost
 from garmin_nof1.pipeline.build_panel import SCHEMA_COLUMNS, assemble_panel, ln_rmssd_from_rmssd
@@ -36,7 +37,7 @@ def test_assemble_panel_fills_contiguous_days_and_schema():
     assert len(df) == 3  # contiguous Jan 1..3
     mid = df.iloc[1]
     assert mid["sport"] == "rest" and mid["trimp"] == 0.0
-    assert bool(mid["hrv_observed"]) is False and np.isnan(mid["ln_rmssd"])
+    assert not mid["hrv_observed"] and np.isnan(mid["ln_rmssd"])
     assert df.iloc[0]["hrv_observed"] and df.iloc[2]["sport"] == "soccer"
 
 
@@ -61,3 +62,31 @@ def test_assembled_panel_is_drop_in_for_layer_a_model():
     df = assemble_panel(records)
     res = fit_recovery_cost(df)  # must not raise; schema is compatible
     assert "soccer" in res.cost_slope and "triathlon" in res.cost_slope
+
+
+def test_assemble_panel_rejects_empty_records():
+    with pytest.raises(ValueError, match="no records"):
+        assemble_panel([])
+
+
+def test_assemble_panel_rejects_duplicate_dates():
+    records = [
+        {
+            "date": "2024-01-01",
+            "sport": "rest",
+            "trimp": 0.0,
+            "sleep_hours": 7.0,
+            "rhr": 50.0,
+            "ln_rmssd": np.log(50.0),
+        },
+        {
+            "date": "2024-01-01",
+            "sport": "soccer",
+            "trimp": 70.0,
+            "sleep_hours": 6.5,
+            "rhr": 55.0,
+            "ln_rmssd": np.log(45.0),
+        },
+    ]
+    with pytest.raises(ValueError, match="duplicate dates"):
+        assemble_panel(records)

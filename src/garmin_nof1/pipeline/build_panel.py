@@ -36,7 +36,15 @@ def assemble_panel(records: Iterable[dict], *, start=None, end=None) -> pd.DataF
     NaN HRV; ``hrv_observed`` flags ln_rmssd presence.
     """
     df = pd.DataFrame(list(records))
+    if df.empty:
+        raise ValueError("assemble_panel received no records; provide at least one day.")
     df["date"] = pd.to_datetime(df["date"])
+    if df["date"].duplicated().any():
+        first_dup = df.loc[df["date"].duplicated(), "date"].iloc[0].date()
+        raise ValueError(
+            f"assemble_panel received duplicate dates (first: {first_dup}); "
+            "deduplicate before calling."
+        )
     lo = df["date"].min() if start is None else pd.Timestamp(start)
     hi = df["date"].max() if end is None else pd.Timestamp(end)
     full = pd.date_range(lo, hi, freq="D")
@@ -50,6 +58,8 @@ def assemble_panel(records: Iterable[dict], *, start=None, end=None) -> pd.DataF
             df[col] = np.nan
     df["sport"] = df["sport"].fillna("rest") if "sport" in df.columns else "rest"
     df["trimp"] = df["trimp"].fillna(0.0)
+    # Any sport value not in _SPORT_CATEGORIES is coerced to NaN by Categorical;
+    # in normal flow only rest/triathlon/soccer reach here (Task 6's sport mapping guarantees it).
     df["sport"] = pd.Categorical(df["sport"], categories=_SPORT_CATEGORIES)
     df["hrv_observed"] = df["ln_rmssd"].notna()
     return df[SCHEMA_COLUMNS]
