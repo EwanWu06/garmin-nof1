@@ -10,6 +10,7 @@ from garmin_nof1.pipeline.build_panel import (
     ln_rmssd_from_rmssd,
     map_sport,
 )
+from garmin_nof1.pipeline.trimp import banister_trimp
 
 
 def test_ln_rmssd_handles_missing():
@@ -115,6 +116,7 @@ def test_daily_fold_priority_soccer_and_sums_trimp():
     folded = daily_sport_and_trimp(activities, hr_rest=50, hr_max=200, sex="M")
     d1 = folded["2024-05-01"]
     assert d1["sport"] == "soccer"  # soccer wins the day's label
-    assert d1["trimp"] > 0  # sum of modeled-session Banister TRIMP
+    expected = banister_trimp(60, 150, 50, 200, "M") + banister_trimp(90, 160, 50, 200, "M")
+    assert abs(d1["trimp"] - expected) < 1e-9
     d2 = folded["2024-05-02"]
     assert d2["sport"] == "rest" and d2["trimp"] == 0.0  # only unmodeled activity

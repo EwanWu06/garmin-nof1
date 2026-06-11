@@ -89,7 +89,12 @@ _SPORT_MAP = {
 
 
 def map_sport(activity_type_key) -> str:
-    """Map a Garmin activityType key to {triathlon, soccer, rest}."""
+    """Map a Garmin activityType key to {triathlon, soccer, rest}.
+
+    Keys are lowercased before lookup so mixed-case export values (e.g. "Running",
+    "SOCCER") are tolerated. Anything not found in the map is treated as an unmodeled
+    session ("rest") that contributes no label priority or TRIMP load.
+    """
     return _SPORT_MAP.get(str(activity_type_key).lower(), "rest")
 
 
@@ -101,6 +106,9 @@ def daily_sport_and_trimp(
     The day's label is the highest-priority modeled sport present (soccer > triathlon >
     rest); ``trimp`` sums Banister TRIMP over the day's modeled (triathlon/soccer)
     sessions. Each activity dict needs ``date, sport_key, hr_avg, duration_min``.
+
+    TRIMP is summed across ALL modeled sessions regardless of which sport wins the label
+    (a "bricks" day — e.g. run + soccer — contributes load from both).
     """
     priority = {"rest": 0, "triathlon": 1, "soccer": 2}
     out: dict[str, dict] = {}
