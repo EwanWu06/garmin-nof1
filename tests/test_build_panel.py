@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from garmin_nof1.models import fit_recovery_cost
+from garmin_nof1.models import fit_recovery_cost, fit_recovery_tau
 from garmin_nof1.pipeline.build_panel import (
     SCHEMA_COLUMNS,
     assemble_panel,
@@ -71,6 +71,9 @@ def test_assembled_panel_is_drop_in_for_layer_a_model():
     df = assemble_panel(records)
     res = fit_recovery_cost(df)  # must not raise; schema is compatible
     assert "soccer" in res.cost_slope and "triathlon" in res.cost_slope
+    # "drop-in for the Layer-A models" is plural: the tau estimator must also accept it.
+    tau = fit_recovery_tau(df)
+    assert "soccer" in tau.tau and "triathlon" in tau.tau
 
 
 def test_assemble_panel_rejects_empty_records():
