@@ -61,3 +61,14 @@ pytest                                  # runs on synthetic data — no private 
 Bootstrapping. Built first (and independent of any private data): the reproducible
 environment, the synthetic data substrate, and the **leakage-safe CV scaffold** — because
 it decides whether every later conclusion can be trusted.
+
+## Pipeline (Phase 0)
+
+`src/garmin_nof1/pipeline/`:
+- `parse_rr.py` — parse activity-FIT `hrv` messages → RR (ms) → RMSSD/SDNN (D-layer).
+- `trimp.py` — Banister (primary) / Edwards / Garmin-load training-load variants.
+- `build_panel.py` — tidy, missingness-aware daily panel (same schema as the synthetic
+  panel, so real data is drop-in for the recovery models).
+- `ingest_garmin.py` — credential-gated Garmin Connect pull; archives raw JSON/FIT to
+  `data/raw/` (gitignored). Set `GARMIN_EMAIL` / `GARMIN_PASSWORD` in `.env` and run it
+  yourself — it analyzes your data locally; nothing personal is committed.

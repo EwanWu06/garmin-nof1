@@ -1,0 +1,2 @@
+# Derived SQLite DB and the tidy daily panel (parquet) land here. Gitignored —
+# always reproducible from data/raw/ via the pipeline.

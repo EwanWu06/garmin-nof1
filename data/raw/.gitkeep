@@ -1,0 +1,3 @@
+# Archived raw Garmin exports go here (FIT files, Connect JSON). Gitignored.
+# Keeping raw archives locally lets the derived panel be regenerated even if
+# Garmin's auth changes (it did, March 2026).

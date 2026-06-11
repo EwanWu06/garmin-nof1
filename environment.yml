@@ -25,6 +25,7 @@ dependencies:
   - pip:
       - fitparse        # parse activity FIT files (chest-strap RR / hrv messages)
       - garminconnect   # unofficial Garmin Connect private-API client (daily panel)
+      - curl_cffi       # TLS-fingerprint session for Garmin auth (Cloudflare/429)
 # ── Optional, per phase (install when needed) ────────────────────────────────
 #   Phase 0  ingest:   garmindb            # Garmin Connect -> SQLite (alt to garminconnect)
 #   Phase 3  modeling: pymc  arviz         # Bayesian within-person hierarchical model
