@@ -12,11 +12,19 @@ here is pure (operates on dicts/DataFrames) and TDD'd on synthetic fixtures.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from garmin_nof1.pipeline.garmin_schema import (
+    activity_to_session,
+    extract_hrv,
+    extract_rhr,
+    extract_sleep,
+)
 from garmin_nof1.pipeline.trimp import banister_trimp
 
 SCHEMA_COLUMNS = ["date", "sport", "trimp", "sleep_hours", "rhr", "ln_rmssd", "hrv_observed"]
@@ -166,3 +174,47 @@ def missingness_diagnostic(df: pd.DataFrame, *, predictor="trimp", target="ln_rm
         "mean_when_present": b,
         "suspect_mar": bool(abs(a - b) > 0.5 * df[predictor].std()),
     }
+
+
+def _load_json_archives(raw_dir: Path, prefix: str) -> list:
+    """Load every archived ``<prefix>-*.json`` in ``raw_dir`` (sorted by filename)."""
+    return [json.loads(p.read_text()) for p in sorted(Path(raw_dir).glob(f"{prefix}-*.json"))]
+
+
+def build_daily_panel(raw_dir, *, hr_rest: float, hr_max: float, sex: str = "M") -> pd.DataFrame:
+    """Assemble a tidy daily panel from archived Garmin Connect JSON in ``raw_dir``.
+
+    Reads the per-day ``hrv``/``sleep``/``rhr`` summaries and the ``activities`` list,
+    runs the assumed-schema adapters (:mod:`garmin_nof1.pipeline.garmin_schema`) and the
+    daily Banister-TRIMP fold, and produces the synthetic-panel schema — a drop-in for the
+    Layer-A models. ``hr_rest`` / ``hr_max`` are the subject's HR bounds for Banister TRIMP.
+
+    The Garmin-response key assumptions live entirely in ``garmin_schema``; reconcile them
+    against your real archives on the first run.
+    """
+    raw_dir = Path(raw_dir)
+    per_day: dict[str, dict] = {}
+
+    for resp in _load_json_archives(raw_dir, "hrv"):
+        got = extract_hrv(resp)
+        if got:
+            date, fields = got
+            per_day.setdefault(date, {})["ln_rmssd"] = ln_rmssd_from_rmssd(fields["rmssd"])
+    for prefix, extract in (("sleep", extract_sleep), ("rhr", extract_rhr)):
+        for resp in _load_json_archives(raw_dir, prefix):
+            got = extract(resp)
+            if got:
+                date, fields = got
+                per_day.setdefault(date, {}).update(fields)
+
+    sessions = []
+    for resp in _load_json_archives(raw_dir, "activities"):
+        for act in resp:
+            session = activity_to_session(act)
+            if session:
+                sessions.append(session)
+    for date, sport_trimp in daily_sport_and_trimp(sessions, hr_rest, hr_max, sex).items():
+        per_day.setdefault(date, {}).update(sport_trimp)
+
+    records = [{"date": date, **fields} for date, fields in per_day.items()]
+    return assemble_panel(records)

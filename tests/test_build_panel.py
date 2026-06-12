@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -6,6 +8,7 @@ from garmin_nof1.models import fit_recovery_cost, fit_recovery_tau
 from garmin_nof1.pipeline.build_panel import (
     SCHEMA_COLUMNS,
     assemble_panel,
+    build_daily_panel,
     classify_missingness,
     daily_sport_and_trimp,
     ln_rmssd_from_rmssd,
@@ -197,3 +200,70 @@ def test_missingness_diagnostic_detects_load_dependence():
     diag = missingness_diagnostic(df, predictor="trimp", target="ln_rmssd")
     assert diag["suspect_mar"] is True
     assert diag["mean_when_missing"] > diag["mean_when_present"]
+
+
+def _write(raw_dir, name, payload):
+    (raw_dir / f"{name}.json").write_text(json.dumps(payload))
+
+
+def test_build_daily_panel_assembles_from_archives(tmp_path):
+    _write(
+        tmp_path,
+        "hrv-2024-05-01",
+        {"hrvSummary": {"calendarDate": "2024-05-01", "lastNightAvg": 55}},
+    )
+    _write(
+        tmp_path,
+        "sleep-2024-05-01",
+        {"dailySleepDTO": {"calendarDate": "2024-05-01", "sleepTimeSeconds": 27000}},
+    )
+    _write(
+        tmp_path,
+        "rhr-2024-05-01",
+        {
+            "allMetrics": {
+                "metricsMap": {
+                    "WELLNESS_RESTING_HEART_RATE": [
+                        {"value": 50, "calendarDate": "2024-05-01"},
+                    ]
+                }
+            }
+        },
+    )
+    _write(
+        tmp_path,
+        "activities-2024-05",
+        [
+            {
+                "startTimeLocal": "2024-05-01 18:00:00",
+                "activityType": {"typeKey": "soccer"},
+                "averageHR": 160,
+                "duration": 5400,
+            }
+        ],
+    )
+
+    df = build_daily_panel(tmp_path, hr_rest=50, hr_max=190, sex="M")
+
+    assert list(df.columns) == SCHEMA_COLUMNS
+    row = df.iloc[0]
+    assert row["sport"] == "soccer" and row["trimp"] > 0
+    assert abs(row["sleep_hours"] - 7.5) < 1e-9 and row["rhr"] == 50.0
+    assert abs(row["ln_rmssd"] - np.log(55.0)) < 1e-9 and bool(row["hrv_observed"]) is True
+
+
+def test_build_daily_panel_fills_gap_day_as_rest(tmp_path):
+    # HRV on 05-01 and 05-03, nothing on 05-02 -> contiguous, 05-02 is rest/non-wear
+    _write(
+        tmp_path,
+        "hrv-2024-05-01",
+        {"hrvSummary": {"calendarDate": "2024-05-01", "lastNightAvg": 55}},
+    )
+    _write(
+        tmp_path,
+        "hrv-2024-05-03",
+        {"hrvSummary": {"calendarDate": "2024-05-03", "lastNightAvg": 48}},
+    )
+    df = build_daily_panel(tmp_path, hr_rest=50, hr_max=190)
+    assert len(df) == 3
+    assert df.iloc[1]["sport"] == "rest" and not df.iloc[1]["hrv_observed"]
