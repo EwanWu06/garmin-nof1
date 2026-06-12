@@ -5,6 +5,12 @@ This is the ONE file that encodes the *assumed* shape of Garmin Connect API resp
 documented inline; they are **reconciled against real responses the first time you run
 ingest**. Everything here is a pure function over dicts — tested with hand-built fixtures,
 never real data — and imports nothing from garminconnect or the rest of the pipeline.
+
+Missing-value convention: a present date with a missing numeric yields ``None`` for
+hrv/rhr and ``float('nan')`` for sleep. Both are harmless downstream —
+``build_daily_panel`` maps the hrv value through ``ln_rmssd_from_rmssd`` (None→NaN)
+and pandas coerces a ``None`` in a numeric column to NaN — so every missing value
+lands as NaN in the assembled panel.
 """
 
 from __future__ import annotations
@@ -12,7 +18,11 @@ from __future__ import annotations
 
 def _get(d, *path, default=None):
     """Safe nested lookup: returns ``default`` if any key is missing or a level is not a
-    dict / is None. Keeps the adapters tolerant of the schema drift we expect on real data."""
+    dict / is None. Keeps the adapters tolerant of the schema drift we expect on real data.
+
+    A key whose *value* is ``None`` is treated identically to an absent key. This is
+    intentional — Garmin returns explicit ``null`` for non-wear nights — so do not
+    simplify ``cur.get(key) is None`` to ``key not in cur``."""
     cur = d
     for key in path:
         if not isinstance(cur, dict) or cur.get(key) is None:
@@ -51,9 +61,11 @@ def extract_rhr(resp: dict):
     Assumed schema: ``resp["allMetrics"]["metricsMap"]["WELLNESS_RESTING_HEART_RATE"]`` is a
     list whose first item has ``{"value", "calendarDate"}``."""
     series = _get(resp, "allMetrics", "metricsMap", "WELLNESS_RESTING_HEART_RATE")
-    if not series:
+    if not series or not isinstance(series, list):
         return None
     first = series[0]
+    if not isinstance(first, dict):
+        return None
     date = first.get("calendarDate")
     if date is None:
         return None

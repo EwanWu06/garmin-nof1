@@ -46,3 +46,15 @@ def test_extract_rhr_pulls_first_metric_value():
 def test_extract_rhr_empty_series_returns_none():
     resp = {"allMetrics": {"metricsMap": {"WELLNESS_RESTING_HEART_RATE": []}}}
     assert extract_rhr(resp) is None
+
+
+def test_extract_sleep_missing_dto_returns_none():
+    assert extract_sleep({}) is None
+
+
+def test_extract_rhr_tolerates_drifted_series_shapes():
+    # series as a dict, or first item not a dict, or first item missing date -> None (no crash)
+    mm = "WELLNESS_RESTING_HEART_RATE"
+    assert extract_rhr({"allMetrics": {"metricsMap": {mm: {"x": 1}}}}) is None
+    assert extract_rhr({"allMetrics": {"metricsMap": {mm: [42]}}}) is None
+    assert extract_rhr({"allMetrics": {"metricsMap": {mm: [{"value": 50}]}}}) is None
