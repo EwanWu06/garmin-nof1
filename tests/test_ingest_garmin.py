@@ -85,3 +85,38 @@ def test_fetch_sleep_and_rhr_and_activities_archive(tmp_path):
     assert (tmp_path / "rhr-2024-05-01.json").exists()
     acts = client.fetch_activities("2024-05-01", "2024-05-31")
     assert len(acts) == 1 and (tmp_path / "activities-2024-05-01_2024-05-31.json").exists()
+
+
+def test_download_activity_fits_writes_files(tmp_path):
+    class FakeApi:
+        def download_activity(self, activity_id, **kwargs):
+            return b"FITDATA-" + str(activity_id).encode()
+
+    cfg = GarminConfig(email="x@y.z", password="pw", raw_dir=tmp_path)
+    client = GarminClient(cfg, api=FakeApi())
+    paths = client.download_activity_fits([101, 202])
+    assert len(paths) == 2
+    assert (tmp_path / "activities" / "101.fit").read_bytes() == b"FITDATA-101"
+    assert (tmp_path / "activities" / "202.fit").exists()
+
+
+def test_ingest_range_pulls_each_day_and_activities(tmp_path):
+    class FakeApi:
+        def get_hrv_data(self, d):
+            return {"hrvSummary": {"calendarDate": d, "lastNightAvg": 50}}
+
+        def get_sleep_data(self, d):
+            return {"dailySleepDTO": {"calendarDate": d, "sleepTimeSeconds": 27000}}
+
+        def get_rhr_day(self, d):
+            return {"date": d, "restingHeartRate": 50}
+
+        def get_activities_by_date(self, start, end):
+            return [{"startTimeLocal": f"{start} 18:00:00"}]
+
+    cfg = GarminConfig(email="x@y.z", password="pw", raw_dir=tmp_path)
+    client = GarminClient(cfg, api=FakeApi())
+    counts = client.ingest_range("2024-05-01", "2024-05-03")
+    assert counts == {"hrv": 3, "sleep": 3, "rhr": 3, "activities": 1}
+    assert len(list(tmp_path.glob("hrv-*.json"))) == 3
+    assert (tmp_path / "activities-2024-05-01_2024-05-03.json").exists()

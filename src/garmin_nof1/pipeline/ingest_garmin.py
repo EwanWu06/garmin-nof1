@@ -17,6 +17,8 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import date as _date
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -131,3 +133,40 @@ class GarminClient:
             "activities",
             f"{start_str}_{end_str}",
         )
+
+    def download_activity_fits(self, activity_ids) -> list[Path]:
+        """Download each activity's original FIT into ``<raw_dir>/activities/<id>.fit``.
+
+        Used only for the 3-month chest-strap window (the D-layer RR source). Real
+        ``garminconnect`` returns the ORIGINAL format as a zip containing the FIT — reconcile
+        the unzip step on the first real run; here we write whatever bytes the api returns."""
+        out_dir = Path(self.config.raw_dir) / "activities"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        api = self._ensure_api()
+        paths = []
+        for activity_id in activity_ids:
+            data = with_backoff(lambda aid=activity_id: api.download_activity(aid))
+            path = out_dir / f"{activity_id}.fit"
+            path.write_bytes(data)
+            paths.append(path)
+        return paths
+
+    def ingest_range(self, start_str: str, end_str: str, *, daily=True, activities=True) -> dict:
+        """Pull and archive daily summaries (hrv/sleep/rhr) for each date in
+        ``[start, end]`` plus the activities list for the range. Returns a counts dict.
+        This is the top-level entrypoint the user runs after filling ``.env``."""
+        counts = {"hrv": 0, "sleep": 0, "rhr": 0, "activities": 0}
+        if daily:
+            start, end = _date.fromisoformat(start_str), _date.fromisoformat(end_str)
+            for offset in range((end - start).days + 1):
+                day = (start + timedelta(days=offset)).isoformat()
+                self.fetch_daily_hrv(day)
+                self.fetch_sleep(day)
+                self.fetch_rhr(day)
+                counts["hrv"] += 1
+                counts["sleep"] += 1
+                counts["rhr"] += 1
+        if activities:
+            acts = self.fetch_activities(start_str, end_str)
+            counts["activities"] = len(acts) if hasattr(acts, "__len__") else 0
+        return counts
