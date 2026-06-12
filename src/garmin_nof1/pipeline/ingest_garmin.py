@@ -124,7 +124,7 @@ class GarminClient:
         return self._fetch_and_archive(lambda: api.get_rhr_day(date_str), "rhr", date_str)
 
     def fetch_activities(self, start_str: str, end_str: str) -> list:
-        """Pull and archive the activity list for the date range [``start_str``, ``end_str``] (YYYY-MM-DD)."""  # noqa: E501
+        """Pull and archive the activity list over [start_str, end_str] (YYYY-MM-DD)."""
         api = self._ensure_api()
         return self._fetch_and_archive(
             lambda: api.get_activities_by_date(start_str, end_str),
