@@ -71,7 +71,11 @@ class GarminConfig:
 
     @classmethod
     def from_env(cls) -> GarminConfig:
-        return cls(email=os.environ["GARMIN_EMAIL"], password=os.environ["GARMIN_PASSWORD"])
+        return cls(
+            email=os.environ["GARMIN_EMAIL"],
+            password=os.environ["GARMIN_PASSWORD"],
+            raw_dir=Path(os.environ.get("GARMIN_RAW_DIR", "data/raw")),
+        )
 
 
 class GarminClient:
@@ -93,8 +97,28 @@ class GarminClient:
             self._api.login()
         return self._api
 
+    def _fetch_and_archive(self, call, name: str, stamp: str) -> dict:
+        """Run an API call through backoff, archive its raw response, and return it."""
+        payload = with_backoff(call)
+        archive_raw(payload, name, self.config.raw_dir, stamp)
+        return payload
+
     def fetch_daily_hrv(self, date_str: str) -> dict:
         api = self._ensure_api()
-        payload = with_backoff(lambda: api.get_hrv_data(date_str))
-        archive_raw(payload, "hrv", self.config.raw_dir, date_str)
-        return payload
+        return self._fetch_and_archive(lambda: api.get_hrv_data(date_str), "hrv", date_str)
+
+    def fetch_sleep(self, date_str: str) -> dict:
+        api = self._ensure_api()
+        return self._fetch_and_archive(lambda: api.get_sleep_data(date_str), "sleep", date_str)
+
+    def fetch_rhr(self, date_str: str) -> dict:
+        api = self._ensure_api()
+        return self._fetch_and_archive(lambda: api.get_rhr_day(date_str), "rhr", date_str)
+
+    def fetch_activities(self, start_str: str, end_str: str) -> list:
+        api = self._ensure_api()
+        return self._fetch_and_archive(
+            lambda: api.get_activities_by_date(start_str, end_str),
+            "activities",
+            f"{start_str}_{end_str}",
+        )

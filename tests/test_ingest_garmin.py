@@ -55,3 +55,33 @@ def test_client_fetch_uses_injected_api_and_archives(tmp_path):
     payload = client.fetch_daily_hrv("2024-01-02")
     assert payload["lastNightAvg"] == 50
     assert (tmp_path / "hrv-2024-01-02.json").exists()
+
+
+def test_from_env_reads_raw_dir_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("GARMIN_EMAIL", "x@y.z")
+    monkeypatch.setenv("GARMIN_PASSWORD", "pw")
+    monkeypatch.setenv("GARMIN_RAW_DIR", str(tmp_path))
+    cfg = GarminConfig.from_env()
+    assert str(cfg.raw_dir) == str(tmp_path)
+
+
+def test_fetch_sleep_and_rhr_and_activities_archive(tmp_path):
+    class FakeApi:
+        def get_sleep_data(self, d):
+            return {"dailySleepDTO": {"calendarDate": d, "sleepTimeSeconds": 27000}}
+
+        def get_rhr_day(self, d):
+            return {"date": d, "restingHeartRate": 50}
+
+        def get_activities_by_date(self, start, end):
+            return [{"startTimeLocal": f"{start} 18:00:00"}]
+
+    cfg = GarminConfig(email="x@y.z", password="pw", raw_dir=tmp_path)
+    client = GarminClient(cfg, api=FakeApi())
+
+    assert client.fetch_sleep("2024-05-01")["dailySleepDTO"]["sleepTimeSeconds"] == 27000
+    assert (tmp_path / "sleep-2024-05-01.json").exists()
+    client.fetch_rhr("2024-05-01")
+    assert (tmp_path / "rhr-2024-05-01.json").exists()
+    acts = client.fetch_activities("2024-05-01", "2024-05-31")
+    assert len(acts) == 1 and (tmp_path / "activities-2024-05-01_2024-05-31.json").exists()
