@@ -72,3 +72,16 @@ it decides whether every later conclusion can be trusted.
 - `ingest_garmin.py` — credential-gated Garmin Connect pull; archives raw JSON/FIT to
   `data/raw/` (gitignored). Set `GARMIN_EMAIL` / `GARMIN_PASSWORD` in `.env` and run it
   yourself — it analyzes your data locally; nothing personal is committed.
+- `garmin_schema.py` — adapters from archived Garmin Connect JSON to tidy records (the
+  *assumed* API schema, reconciled on first real run).
+
+End-to-end (after `.env` is set):
+
+```python
+from garmin_nof1.pipeline.ingest_garmin import GarminClient, GarminConfig
+from garmin_nof1.pipeline.build_panel import build_daily_panel
+
+client = GarminClient(GarminConfig.from_env())
+client.ingest_range("2023-01-01", "2024-12-31")        # archives daily summaries + activities
+panel = build_daily_panel("data/raw", hr_rest=48, hr_max=190)   # model-ready panel
+```
