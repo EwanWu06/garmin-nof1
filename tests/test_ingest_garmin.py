@@ -97,7 +97,7 @@ def test_download_activity_fits_writes_files(tmp_path):
     paths = client.download_activity_fits([101, 202])
     assert len(paths) == 2
     assert (tmp_path / "activities" / "101.fit").read_bytes() == b"FITDATA-101"
-    assert (tmp_path / "activities" / "202.fit").exists()
+    assert (tmp_path / "activities" / "202.fit").read_bytes() == b"FITDATA-202"
 
 
 def test_ingest_range_pulls_each_day_and_activities(tmp_path):

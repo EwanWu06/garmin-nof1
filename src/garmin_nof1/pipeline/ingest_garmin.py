@@ -134,7 +134,7 @@ class GarminClient:
             f"{start_str}_{end_str}",
         )
 
-    def download_activity_fits(self, activity_ids) -> list[Path]:
+    def download_activity_fits(self, activity_ids: list[int]) -> list[Path]:
         """Download each activity's original FIT into ``<raw_dir>/activities/<id>.fit``.
 
         Used only for the 3-month chest-strap window (the D-layer RR source). Real
@@ -154,7 +154,11 @@ class GarminClient:
     def ingest_range(self, start_str: str, end_str: str, *, daily=True, activities=True) -> dict:
         """Pull and archive daily summaries (hrv/sleep/rhr) for each date in
         ``[start, end]`` plus the activities list for the range. Returns a counts dict.
-        This is the top-level entrypoint the user runs after filling ``.env``."""
+        This is the top-level entrypoint the user runs after filling ``.env``.
+
+        If a fetch raises mid-run, prior days' archives are already written and a re-run
+        will re-pull them (there is no skip-if-exists), so for large ranges narrow the
+        window on retry."""
         counts = {"hrv": 0, "sleep": 0, "rhr": 0, "activities": 0}
         if daily:
             start, end = _date.fromisoformat(start_str), _date.fromisoformat(end_str)
