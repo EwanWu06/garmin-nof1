@@ -70,3 +70,26 @@ def extract_rhr(resp: dict):
     if date is None:
         return None
     return (str(date), {"rhr": first.get("value")})
+
+
+def activity_to_session(act: dict):
+    """One ``get_activities_by_date`` item -> the session dict that
+    ``garmin_nof1.pipeline.build_panel.daily_sport_and_trimp`` consumes:
+    ``{date, sport_key, hr_avg, duration_min}``. Returns None when HR or duration is
+    missing (Banister TRIMP needs both).
+
+    Assumed schema: ``act["startTimeLocal"]`` (``"YYYY-MM-DD HH:MM:SS"`` or ISO),
+    ``act["activityType"]["typeKey"]``, ``act["averageHR"]``, ``act["duration"]`` (seconds)."""
+    start = act.get("startTimeLocal")
+    type_key = _get(act, "activityType", "typeKey")
+    hr_avg = act.get("averageHR")
+    dur_s = act.get("duration")
+    if start is None or type_key is None or hr_avg is None or dur_s is None:
+        return None
+    date = str(start).split("T")[0].split(" ")[0]  # tolerate space- or T-separated datetimes
+    return {
+        "date": date,
+        "sport_key": type_key,
+        "hr_avg": hr_avg,
+        "duration_min": float(dur_s) / 60.0,
+    }

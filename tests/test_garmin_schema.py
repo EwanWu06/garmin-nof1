@@ -1,6 +1,11 @@
 import numpy as np
 
-from garmin_nof1.pipeline.garmin_schema import extract_hrv, extract_rhr, extract_sleep
+from garmin_nof1.pipeline.garmin_schema import (
+    activity_to_session,
+    extract_hrv,
+    extract_rhr,
+    extract_sleep,
+)
 
 
 def test_extract_hrv_pulls_date_and_nightly_rmssd():
@@ -58,3 +63,30 @@ def test_extract_rhr_tolerates_drifted_series_shapes():
     assert extract_rhr({"allMetrics": {"metricsMap": {mm: {"x": 1}}}}) is None
     assert extract_rhr({"allMetrics": {"metricsMap": {mm: [42]}}}) is None
     assert extract_rhr({"allMetrics": {"metricsMap": {mm: [{"value": 50}]}}}) is None
+
+
+def test_activity_to_session_maps_fields_and_date():
+    act = {
+        "startTimeLocal": "2024-05-01 18:00:00",
+        "activityType": {"typeKey": "soccer"},
+        "averageHR": 160,
+        "duration": 5400,
+    }
+    s = activity_to_session(act)
+    assert s == {"date": "2024-05-01", "sport_key": "soccer", "hr_avg": 160, "duration_min": 90.0}
+
+
+def test_activity_to_session_tolerates_iso_start():
+    act = {
+        "startTimeLocal": "2024-05-02T07:30:00",
+        "activityType": {"typeKey": "running"},
+        "averageHR": 140,
+        "duration": 1800,
+    }
+    assert activity_to_session(act)["date"] == "2024-05-02"
+
+
+def test_activity_to_session_none_when_hr_or_duration_missing():
+    base = {"startTimeLocal": "2024-05-01 18:00:00", "activityType": {"typeKey": "soccer"}}
+    assert activity_to_session({**base, "duration": 5400}) is None  # no averageHR
+    assert activity_to_session({**base, "averageHR": 160}) is None  # no duration
