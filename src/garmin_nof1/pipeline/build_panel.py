@@ -181,7 +181,9 @@ def _load_json_archives(raw_dir: Path, prefix: str) -> list:
     return [json.loads(p.read_text()) for p in sorted(Path(raw_dir).glob(f"{prefix}-*.json"))]
 
 
-def build_daily_panel(raw_dir, *, hr_rest: float, hr_max: float, sex: str = "M") -> pd.DataFrame:
+def build_daily_panel(
+    raw_dir: Path | str, *, hr_rest: float, hr_max: float, sex: str = "M"
+) -> pd.DataFrame:
     """Assemble a tidy daily panel from archived Garmin Connect JSON in ``raw_dir``.
 
     Reads the per-day ``hrv``/``sleep``/``rhr`` summaries and the ``activities`` list,
@@ -191,6 +193,16 @@ def build_daily_panel(raw_dir, *, hr_rest: float, hr_max: float, sex: str = "M")
 
     The Garmin-response key assumptions live entirely in ``garmin_schema``; reconcile them
     against your real archives on the first run.
+
+    Assumption:
+        Expects **one archive per calendar date per prefix** — the ingest naming convention
+        ``<prefix>-<ISO-date>.json`` guarantees this. If two archives shared a date the
+        lexically-last file would silently win (``_load_json_archives`` sorts by filename).
+
+    Raises:
+        ValueError: if no records are found in ``raw_dir`` (propagated from
+            :func:`assemble_panel`).
+        OSError: if ``raw_dir`` does not exist or is not readable.
     """
     raw_dir = Path(raw_dir)
     per_day: dict[str, dict] = {}
