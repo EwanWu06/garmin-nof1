@@ -18,6 +18,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 def with_backoff(
@@ -97,25 +98,33 @@ class GarminClient:
             self._api.login()
         return self._api
 
-    def _fetch_and_archive(self, call, name: str, stamp: str) -> dict:
-        """Run an API call through backoff, archive its raw response, and return it."""
+    def _fetch_and_archive(self, call, name: str, stamp: str) -> Any:
+        """Run an API call through backoff, archive its raw response, and return it.
+
+        The return type mirrors ``call()``'s own return type: a dict for single-day
+        endpoints (hrv / sleep / rhr) and a list for the activities range endpoint.
+        """
         payload = with_backoff(call)
         archive_raw(payload, name, self.config.raw_dir, stamp)
         return payload
 
     def fetch_daily_hrv(self, date_str: str) -> dict:
+        """Pull and archive the nightly HRV-status summary for ``date_str`` (YYYY-MM-DD)."""
         api = self._ensure_api()
         return self._fetch_and_archive(lambda: api.get_hrv_data(date_str), "hrv", date_str)
 
     def fetch_sleep(self, date_str: str) -> dict:
+        """Pull and archive the daily sleep summary for ``date_str`` (YYYY-MM-DD)."""
         api = self._ensure_api()
         return self._fetch_and_archive(lambda: api.get_sleep_data(date_str), "sleep", date_str)
 
     def fetch_rhr(self, date_str: str) -> dict:
+        """Pull and archive the resting-heart-rate summary for ``date_str`` (YYYY-MM-DD)."""
         api = self._ensure_api()
         return self._fetch_and_archive(lambda: api.get_rhr_day(date_str), "rhr", date_str)
 
     def fetch_activities(self, start_str: str, end_str: str) -> list:
+        """Pull and archive the activity list for the date range [``start_str``, ``end_str``] (YYYY-MM-DD)."""  # noqa: E501
         api = self._ensure_api()
         return self._fetch_and_archive(
             lambda: api.get_activities_by_date(start_str, end_str),
