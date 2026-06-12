@@ -25,6 +25,7 @@ dependencies:
   - pip:
       - fitparse        # parse activity FIT files (chest-strap RR / hrv messages)
       - garminconnect   # unofficial Garmin Connect private-API client (daily panel)
+      - garth           # Garmin SSO/auth backend used by garminconnect (login + MFA + token store)
       - curl_cffi       # TLS-fingerprint session for Garmin auth (Cloudflare/429)
 # ── Optional, per phase (install when needed) ────────────────────────────────
 #   Phase 0  ingest:   garmindb            # Garmin Connect -> SQLite (alt to garminconnect)

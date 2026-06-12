@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ingest = ["fitparse", "garminconnect", "curl_cffi"]
+ingest = ["fitparse", "garminconnect", "garth", "curl_cffi"]
 modeling = ["pymc", "arviz"]
 coupling = ["tigramite"]
 dev = ["pytest", "pytest-cov", "ruff"]
