@@ -1,4 +1,6 @@
+import io
 import json
+import zipfile
 from unittest.mock import Mock
 
 import pytest
@@ -87,17 +89,28 @@ def test_fetch_sleep_and_rhr_and_activities_archive(tmp_path):
     assert len(acts) == 1 and (tmp_path / "activities-2024-05-01_2024-05-31.json").exists()
 
 
-def test_download_activity_fits_writes_files(tmp_path):
+def test_download_activity_fits_extracts_fit_from_original_zip(tmp_path):
+    captured = {}
+
+    def _make_zip(payload: bytes) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("activity.fit", payload)
+        return buf.getvalue()
+
     class FakeApi:
-        def download_activity(self, activity_id, **kwargs):
-            return b"FITDATA-" + str(activity_id).encode()
+        def download_activity(self, activity_id, dl_fmt=None):
+            captured["fmt"] = dl_fmt  # record that the format is forwarded
+            return _make_zip(b"FITDATA-" + str(activity_id).encode())
 
     cfg = GarminConfig(email="x@y.z", password="pw", raw_dir=tmp_path)
     client = GarminClient(cfg, api=FakeApi())
-    paths = client.download_activity_fits([101, 202])
+    paths = client.download_activity_fits([101, 202], dl_fmt="ORIGINAL_SENTINEL")
+
     assert len(paths) == 2
     assert (tmp_path / "activities" / "101.fit").read_bytes() == b"FITDATA-101"
     assert (tmp_path / "activities" / "202.fit").read_bytes() == b"FITDATA-202"
+    assert captured["fmt"] == "ORIGINAL_SENTINEL"  # forwarded explicitly, not the TCX default
 
 
 def test_ingest_range_pulls_each_day_and_activities(tmp_path):

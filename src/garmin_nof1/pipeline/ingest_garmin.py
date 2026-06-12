@@ -13,9 +13,11 @@ takes an injectable ``api`` so its wiring is tested with a fake.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import time
+import zipfile
 from dataclasses import dataclass, field
 from datetime import date as _date
 from datetime import timedelta
@@ -62,6 +64,20 @@ def archive_raw(payload, name: str, raw_dir, date_str: str) -> Path:
     path = raw_dir / f"{name}-{date_str}.json"
     path.write_text(json.dumps(payload, indent=2, default=str))
     return path
+
+
+def _extract_fits(zip_bytes: bytes, activity_id, out_dir: Path) -> list[Path]:
+    """Extract the ``.fit`` member(s) from a Garmin ORIGINAL-format zip into ``out_dir``,
+    named by activity id (``<id>.fit``; ``<id>-<n>.fit`` if a zip holds several)."""
+    paths = []
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        fit_names = [n for n in zf.namelist() if n.lower().endswith(".fit")]
+        for i, name in enumerate(fit_names):
+            suffix = "" if len(fit_names) == 1 else f"-{i}"
+            path = out_dir / f"{activity_id}{suffix}.fit"
+            path.write_bytes(zf.read(name))
+            paths.append(path)
+    return paths
 
 
 @dataclass
@@ -134,21 +150,26 @@ class GarminClient:
             f"{start_str}_{end_str}",
         )
 
-    def download_activity_fits(self, activity_ids: list[int]) -> list[Path]:
-        """Download each activity's original FIT into ``<raw_dir>/activities/<id>.fit``.
+    def download_activity_fits(self, activity_ids: list[int], *, dl_fmt=None) -> list[Path]:
+        """Download each activity's ORIGINAL export (a zip containing the ``.fit``) and
+        extract the FIT into ``<raw_dir>/activities/<id>.fit``.
 
-        Used only for the 3-month chest-strap window (the D-layer RR source). Real
-        ``garminconnect`` returns the ORIGINAL format as a zip containing the FIT — reconcile
-        the unzip step on the first real run; here we write whatever bytes the api returns."""
+        ORIGINAL is requested explicitly because it is the only format carrying the
+        beat-to-beat ``hrv`` messages the D-layer RR reconstruction needs — Garmin's
+        download default (TCX) does not. ``dl_fmt`` defaults to garminconnect's ORIGINAL
+        enum (resolved lazily so tests need no garminconnect); pass an explicit value to
+        override. Used only for the 3-month chest-strap window."""
         out_dir = Path(self.config.raw_dir) / "activities"
         out_dir.mkdir(parents=True, exist_ok=True)
         api = self._ensure_api()
+        if dl_fmt is None:  # pragma: no cover - requires garminconnect
+            from garminconnect import Garmin
+
+            dl_fmt = Garmin.ActivityDownloadFormat.ORIGINAL
         paths = []
         for activity_id in activity_ids:
-            data = with_backoff(lambda aid=activity_id: api.download_activity(aid))
-            path = out_dir / f"{activity_id}.fit"
-            path.write_bytes(data)
-            paths.append(path)
+            data = with_backoff(lambda aid=activity_id: api.download_activity(aid, dl_fmt))
+            paths.extend(_extract_fits(data, activity_id, out_dir))
         return paths
 
     def ingest_range(self, start_str: str, end_str: str, *, daily=True, activities=True) -> dict:
