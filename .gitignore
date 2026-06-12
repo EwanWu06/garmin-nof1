@@ -47,6 +47,11 @@ env/
 .idea/
 .vscode/
 
+# ── Local-only docs — kept off the public repo (project framing + AI planning) ─
+docs/PROJECT.md
+docs/PLAN.md
+docs/superpowers/
+
 # ── Allow-list: keep directory structure + small public fixtures ─────────────
 !data/raw/.gitkeep
 !data/derived/.gitkeep

@@ -19,7 +19,7 @@ the deliverables.
 
 Optional, data-permitting extensions: exploratory directed-coupling discovery (PCMCI+,
 surrogate-gated), a Banister fitness–fatigue ill-posedness replication, anomaly/early-warning
-detection. See `docs/PLAN.md`.
+detection.
 
 ## Honest constraints (these shape everything)
 
@@ -43,7 +43,6 @@ src/garmin_nof1/
   models/               # recovery-cost model + AR(1)-baseline prediction
 tests/                  # pytest; includes a leakage-injection test for the CV scaffold
 data/                   # gitignored: raw FIT/JSON archive + derived DB/panel
-docs/PLAN.md            # the full phased plan
 preregistration/        # OSF pre-registration draft
 ```
 
