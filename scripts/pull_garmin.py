@@ -26,39 +26,48 @@ import getpass
 import glob
 import json
 import os
+from pathlib import Path
 
 from garmin_nof1.pipeline.ingest_garmin import GarminClient, GarminConfig
 
-TOKENSTORE = os.path.expanduser("~/.garminconnect")  # cached login session (private)
+# Cached login sessions (private). China-region and global accounts get separate stores so
+# their sessions never clobber each other.
+TOKENSTORE = os.path.expanduser("~/.garminconnect")
+TOKENSTORE_CN = os.path.expanduser("~/.garminconnect-cn")
 
 
-def get_api():
-    """Return an authenticated garminconnect client, reusing a saved session if possible."""
+def get_api(is_cn: bool, tokenstore: str):
+    """Return an authenticated garminconnect client, reusing a saved session if possible.
+
+    ``is_cn=True`` routes to Garmin China (connect.garmin.cn) instead of the global servers.
+    """
     from garminconnect import Garmin
 
+    region = "中国区" if is_cn else "国际区"
     # Try to resume a previously-saved login (no password needed).
-    if os.path.isdir(TOKENSTORE):
+    if os.path.isdir(tokenstore):
         try:
-            api = Garmin()
-            api.login(TOKENSTORE)
-            print("✓ 复用已保存的登录会话(无需输密码)")
+            api = Garmin(is_cn=is_cn)
+            api.login(tokenstore)
+            print(f"✓ 复用已保存的{region}登录会话(无需输密码)")
             return api
         except Exception:
-            print("（已保存的登录失效,需要重新登录一次）")
+            print(f"（已保存的{region}登录失效,需要重新登录一次）")
 
     # Fresh login.
+    print(f"== 登录 Garmin {region} ==")
     email = input("Garmin 邮箱: ").strip()
     password = getpass.getpass("Garmin 密码(输入时屏幕不显示,输完按回车): ")
     print("若账号开了二次验证,接下来会让你输手机/邮箱收到的 6 位码(没开就直接回车跳过)。")
     mfa_prompt = "二次验证码(没有就回车): "
-    api = Garmin(email, password, prompt_mfa=lambda: input(mfa_prompt).strip())
+    api = Garmin(email, password, is_cn=is_cn, prompt_mfa=lambda: input(mfa_prompt).strip())
     api.login()
     try:
-        os.makedirs(TOKENSTORE, exist_ok=True)
-        api.garth.dump(TOKENSTORE)
-        print("✓ 登录成功,会话已保存,下次运行免密")
+        os.makedirs(tokenstore, exist_ok=True)
+        api.garth.dump(tokenstore)
+        print(f"✓ {region}登录成功,会话已保存,下次运行免密")
     except Exception:
-        print("✓ 登录成功")
+        print(f"✓ {region}登录成功")
     return api
 
 
@@ -116,14 +125,22 @@ def main():
     today = datetime.date.today()
     parser.add_argument("--start", default=None, help="开始日期 YYYY-MM-DD(默认:7 天前)")
     parser.add_argument("--end", default=None, help="结束日期 YYYY-MM-DD(默认:今天)")
+    parser.add_argument("--cn", action="store_true", help="从 Garmin 中国(connect.garmin.cn)拉取")
+    parser.add_argument(
+        "--raw-dir",
+        default=None,
+        help="存档目录(默认:国际区 data/raw,中国区 data/raw_cn —— 两个账号自动分开存)",
+    )
     args = parser.parse_args()
 
     end = args.end or today.isoformat()
     start = args.start or (today - datetime.timedelta(days=7)).isoformat()
+    raw_dir = args.raw_dir or ("data/raw_cn" if args.cn else "data/raw")
+    tokenstore = TOKENSTORE_CN if args.cn else TOKENSTORE
 
-    api = get_api()
+    api = get_api(args.cn, tokenstore)
     # creds unused here — the already-authenticated api is injected — so placeholders are fine.
-    config = GarminConfig(email="-", password="-")
+    config = GarminConfig(email="-", password="-", raw_dir=Path(raw_dir))
     client = GarminClient(config, api=api)
 
     print(f"\n正在拉取 {start} → {end} 的日汇总 + 活动 ...(范围大时会比较久)")

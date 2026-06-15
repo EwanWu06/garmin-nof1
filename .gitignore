@@ -2,6 +2,8 @@
 # Raw exports, derived databases, and anything that could contain your own
 # physiology. The whole pipeline is designed so these can be regenerated.
 data/raw/
+data/raw_cn/
+data/raw_us/
 data/derived/
 data/interim/
 *.fit
