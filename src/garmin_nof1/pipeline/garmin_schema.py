@@ -58,15 +58,18 @@ def extract_sleep(resp: dict):
 def extract_rhr(resp: dict):
     """``get_rhr_day`` response -> ``(date, {"rhr": value})`` or None.
 
-    Assumed schema: ``resp["allMetrics"]["metricsMap"]["WELLNESS_RESTING_HEART_RATE"]`` is a
-    list whose first item has ``{"value", "calendarDate"}``."""
+    Confirmed against real data: ``resp["allMetrics"]["metricsMap"]
+    ["WELLNESS_RESTING_HEART_RATE"]`` is a single-item list of ``{"value", ...}``. The item's
+    own ``calendarDate`` is used when present; otherwise we fall back to the response's
+    top-level ``statisticsStartDate`` (which a single-day query always carries), so the RHR
+    is never silently dropped just because the per-item date is absent."""
     series = _get(resp, "allMetrics", "metricsMap", "WELLNESS_RESTING_HEART_RATE")
     if not series or not isinstance(series, list):
         return None
     first = series[0]
     if not isinstance(first, dict):
         return None
-    date = first.get("calendarDate")
+    date = first.get("calendarDate") or _get(resp, "statisticsStartDate")
     if date is None:
         return None
     return (str(date), {"rhr": first.get("value")})

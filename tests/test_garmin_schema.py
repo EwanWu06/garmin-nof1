@@ -65,6 +65,16 @@ def test_extract_rhr_tolerates_drifted_series_shapes():
     assert extract_rhr({"allMetrics": {"metricsMap": {mm: [{"value": 50}]}}}) is None
 
 
+def test_extract_rhr_falls_back_to_statistics_start_date():
+    # per-item calendarDate absent -> use the response's top-level statisticsStartDate
+    resp = {
+        "statisticsStartDate": "2026-06-08",
+        "allMetrics": {"metricsMap": {"WELLNESS_RESTING_HEART_RATE": [{"value": 50}]}},
+    }
+    date, fields = extract_rhr(resp)
+    assert date == "2026-06-08" and fields["rhr"] == 50
+
+
 def test_activity_to_session_maps_fields_and_date():
     act = {
         "startTimeLocal": "2024-05-01 18:00:00",
