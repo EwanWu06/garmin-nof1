@@ -267,3 +267,17 @@ def test_build_daily_panel_fills_gap_day_as_rest(tmp_path):
     df = build_daily_panel(tmp_path, hr_rest=50, hr_max=190)
     assert len(df) == 3
     assert df.iloc[1]["sport"] == "rest" and not df.iloc[1]["hrv_observed"]
+
+
+def test_build_daily_panel_combines_multiple_dirs(tmp_path):
+    # Two Garmin accounts with non-overlapping dates -> one panel spanning both.
+    cn = tmp_path / "cn"
+    us = tmp_path / "us"
+    cn.mkdir()
+    us.mkdir()
+    _write(cn, "hrv-2024-01-01", {"hrvSummary": {"calendarDate": "2024-01-01", "lastNightAvg": 50}})
+    _write(us, "hrv-2024-01-03", {"hrvSummary": {"calendarDate": "2024-01-03", "lastNightAvg": 60}})
+    df = build_daily_panel([cn, us], hr_rest=50, hr_max=190)
+    assert len(df) == 3  # 2024-01-01 .. 2024-01-03, contiguous across the two accounts
+    assert bool(df.iloc[0]["hrv_observed"]) and bool(df.iloc[2]["hrv_observed"])
+    assert not df.iloc[1]["hrv_observed"]  # the gap day between accounts is filled as rest

@@ -182,45 +182,55 @@ def _load_json_archives(raw_dir: Path, prefix: str) -> list:
 
 
 def build_daily_panel(
-    raw_dir: Path | str, *, hr_rest: float, hr_max: float, sex: str = "M"
+    raw_dir: Path | str | list, *, hr_rest: float, hr_max: float, sex: str = "M"
 ) -> pd.DataFrame:
-    """Assemble a tidy daily panel from archived Garmin Connect JSON in ``raw_dir``.
+    """Assemble a tidy daily panel from archived Garmin Connect JSON.
 
-    Reads the per-day ``hrv``/``sleep``/``rhr`` summaries and the ``activities`` list,
-    runs the assumed-schema adapters (:mod:`garmin_nof1.pipeline.garmin_schema`) and the
-    daily Banister-TRIMP fold, and produces the synthetic-panel schema — a drop-in for the
-    Layer-A models. ``hr_rest`` / ``hr_max`` are the subject's HR bounds for Banister TRIMP.
+    ``raw_dir`` is one archive directory, or a **list** of directories (e.g. one per Garmin
+    account — ``["data/raw", "data/raw_cn"]`` — whose date ranges don't overlap). Reads the
+    per-day ``hrv``/``sleep``/``rhr`` summaries and the ``activities`` list from every given
+    directory, runs the assumed-schema adapters (:mod:`garmin_nof1.pipeline.garmin_schema`)
+    and the daily Banister-TRIMP fold, and produces the synthetic-panel schema — a drop-in
+    for the Layer-A models. ``hr_rest`` / ``hr_max`` are the subject's HR bounds for Banister
+    TRIMP.
 
     The Garmin-response key assumptions live entirely in ``garmin_schema``; reconcile them
     against your real archives on the first run.
 
     Assumption:
-        Expects **one archive per calendar date per prefix** — the ingest naming convention
-        ``<prefix>-<ISO-date>.json`` guarantees this. If two archives shared a date the
-        lexically-last file would silently win (``_load_json_archives`` sorts by filename).
+        One archive per calendar date per prefix (the ``<prefix>-<ISO-date>.json`` ingest
+        naming guarantees this within a directory). When several directories are given and a
+        date appears in more than one, the **later-listed** directory wins for that date; a
+        missing directory simply contributes nothing.
 
     Raises:
-        ValueError: if no records are found in ``raw_dir`` (propagated from
+        ValueError: if no records are found across the given directories (propagated from
             :func:`assemble_panel`).
-        OSError: if ``raw_dir`` does not exist or is not readable.
     """
-    raw_dir = Path(raw_dir)
-    per_day: dict[str, dict] = {}
+    dirs = [raw_dir] if isinstance(raw_dir, (str, Path)) else list(raw_dir)
+    dirs = [Path(d) for d in dirs]
 
-    for resp in _load_json_archives(raw_dir, "hrv"):
+    def _load(prefix: str) -> list:
+        out: list = []
+        for directory in dirs:
+            out.extend(_load_json_archives(directory, prefix))
+        return out
+
+    per_day: dict[str, dict] = {}
+    for resp in _load("hrv"):
         got = extract_hrv(resp)
         if got:
             date, fields = got
             per_day.setdefault(date, {})["ln_rmssd"] = ln_rmssd_from_rmssd(fields["rmssd"])
     for prefix, extract in (("sleep", extract_sleep), ("rhr", extract_rhr)):
-        for resp in _load_json_archives(raw_dir, prefix):
+        for resp in _load(prefix):
             got = extract(resp)
             if got:
                 date, fields = got
                 per_day.setdefault(date, {}).update(fields)
 
     sessions = []
-    for resp in _load_json_archives(raw_dir, "activities"):
+    for resp in _load("activities"):
         for act in resp:
             session = activity_to_session(act)
             if session:
