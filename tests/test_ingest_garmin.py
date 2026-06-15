@@ -133,3 +133,32 @@ def test_ingest_range_pulls_each_day_and_activities(tmp_path):
     assert counts == {"hrv": 3, "sleep": 3, "rhr": 3, "activities": 1}
     assert len(list(tmp_path.glob("hrv-*.json"))) == 3
     assert (tmp_path / "activities-2024-05-01_2024-05-03.json").exists()
+
+
+def test_ingest_range_skips_already_archived_days(tmp_path):
+    # Resume behavior: a day whose archive already exists is not re-fetched.
+    calls = {"hrv": 0}
+
+    class FakeApi:
+        def get_hrv_data(self, d):
+            calls["hrv"] += 1
+            return {"hrvSummary": {"calendarDate": d, "lastNightAvg": 50}}
+
+        def get_sleep_data(self, d):
+            return {"dailySleepDTO": {"calendarDate": d, "sleepTimeSeconds": 27000}}
+
+        def get_rhr_day(self, d):
+            return {"date": d, "restingHeartRate": 50}
+
+        def get_activities_by_date(self, start, end):
+            return [{"startTimeLocal": f"{start} 18:00:00"}]
+
+    cfg = GarminConfig(email="x@y.z", password="pw", raw_dir=tmp_path)
+    client = GarminClient(cfg, api=FakeApi())
+    (tmp_path / "hrv-2024-05-01.json").write_text("{}")  # pretend day 1 hrv was already pulled
+
+    counts = client.ingest_range("2024-05-01", "2024-05-02")
+
+    assert counts["hrv"] == 1  # only day 2's hrv newly fetched
+    assert calls["hrv"] == 1  # the API was NOT called for the pre-existing day
+    assert counts["sleep"] == 2 and counts["rhr"] == 2  # those weren't pre-created

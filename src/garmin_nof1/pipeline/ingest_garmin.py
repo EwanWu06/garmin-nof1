@@ -172,26 +172,37 @@ class GarminClient:
             paths.extend(_extract_fits(data, activity_id, out_dir))
         return paths
 
-    def ingest_range(self, start_str: str, end_str: str, *, daily=True, activities=True) -> dict:
+    def ingest_range(
+        self, start_str: str, end_str: str, *, daily=True, activities=True, skip_existing=True
+    ) -> dict:
         """Pull and archive daily summaries (hrv/sleep/rhr) for each date in
-        ``[start, end]`` plus the activities list for the range. Returns a counts dict.
-        This is the top-level entrypoint the user runs after filling ``.env``.
+        ``[start, end]`` plus the activities list for the range. Returns a counts dict of
+        what was **newly fetched** this run. This is the top-level entrypoint the user runs
+        after filling ``.env``.
 
-        If a fetch raises mid-run, prior days' archives are already written and a re-run
-        will re-pull them (there is no skip-if-exists), so for large ranges narrow the
-        window on retry."""
+        With ``skip_existing=True`` (default) a day's archive that already exists on disk is
+        not re-fetched, so a re-run after a mid-range failure (e.g. a rate-limit 429) resumes
+        where it left off instead of starting the whole multi-year pull over. Re-running the
+        same command is therefore safe and cheap."""
+        raw_dir = Path(self.config.raw_dir)
         counts = {"hrv": 0, "sleep": 0, "rhr": 0, "activities": 0}
         if daily:
+            fetchers = {
+                "hrv": self.fetch_daily_hrv,
+                "sleep": self.fetch_sleep,
+                "rhr": self.fetch_rhr,
+            }
             start, end = _date.fromisoformat(start_str), _date.fromisoformat(end_str)
             for offset in range((end - start).days + 1):
                 day = (start + timedelta(days=offset)).isoformat()
-                self.fetch_daily_hrv(day)
-                self.fetch_sleep(day)
-                self.fetch_rhr(day)
-                counts["hrv"] += 1
-                counts["sleep"] += 1
-                counts["rhr"] += 1
+                for name, fetch in fetchers.items():
+                    if skip_existing and (raw_dir / f"{name}-{day}.json").exists():
+                        continue
+                    fetch(day)
+                    counts[name] += 1
         if activities:
-            acts = self.fetch_activities(start_str, end_str)
-            counts["activities"] = len(acts) if hasattr(acts, "__len__") else 0
+            stamp = raw_dir / f"activities-{start_str}_{end_str}.json"
+            if not (skip_existing and stamp.exists()):
+                acts = self.fetch_activities(start_str, end_str)
+                counts["activities"] = len(acts) if hasattr(acts, "__len__") else 0
         return counts

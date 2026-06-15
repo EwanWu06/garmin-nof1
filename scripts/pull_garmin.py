@@ -127,8 +127,9 @@ def main():
     client = GarminClient(config, api=api)
 
     print(f"\n正在拉取 {start} → {end} 的日汇总 + 活动 ...(范围大时会比较久)")
+    print("（若中途断了/被限流,直接重跑本命令即可续传 —— 已拉过的天会自动跳过)")
     counts = client.ingest_range(start, end)
-    print("完成。归档条数:", counts)
+    print("完成。本次新拉取条数:", counts)
     print("原始文件在:", config.raw_dir.resolve())
 
     show_samples(config.raw_dir)
