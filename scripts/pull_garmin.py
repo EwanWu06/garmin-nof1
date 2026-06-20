@@ -13,9 +13,12 @@ Usage
 -----
     python scripts/pull_garmin.py                         # test pull: the last 7 days
     python scripts/pull_garmin.py --start 2023-01-01 --end 2024-12-31   # the full range
+    python scripts/pull_garmin.py --cn --start 2024-01-01 --end 2025-12-15  # China account
 
-Your password is typed interactively and never written to disk. The login session is
-cached under ``~/.garminconnect`` (also private).
+Global accounts authenticate via garminconnect; China accounts (``--cn``) via garth, which
+is the only one of the two that speaks connect.garmin.cn's OAuth correctly. Your password is
+typed interactively and never written to disk. Login sessions are cached privately (global:
+``~/.garminconnect``; China: ``~/.garth-cn``).
 """
 
 from __future__ import annotations
@@ -30,45 +33,119 @@ from pathlib import Path
 
 from garmin_nof1.pipeline.ingest_garmin import GarminClient, GarminConfig
 
-# Cached login sessions (private). China-region and global accounts get separate stores so
-# their sessions never clobber each other.
+# Cached login sessions (private), separate per account so they never clobber each other.
+# The global account uses garminconnect (DI tokens -> ~/.garminconnect); the China account
+# uses garth (OAuth1/OAuth2 tokens -> ~/.garth-cn), because garminconnect 0.3.2 can't
+# authenticate China data calls (see _get_api_cn / garth_cn).
 TOKENSTORE = os.path.expanduser("~/.garminconnect")
-TOKENSTORE_CN = os.path.expanduser("~/.garminconnect-cn")
+TOKENSTORE_CN = os.path.expanduser("~/.garth-cn")
 
 
-def get_api(is_cn: bool, tokenstore: str):
-    """Return an authenticated garminconnect client, reusing a saved session if possible.
-
-    ``is_cn=True`` routes to Garmin China (connect.garmin.cn) instead of the global servers.
-    """
-    from garminconnect import Garmin
-
-    region = "中国区" if is_cn else "国际区"
-    # Try to resume a previously-saved login (no password needed).
-    if os.path.isdir(tokenstore):
-        try:
-            api = Garmin(is_cn=is_cn)
-            api.login(tokenstore)
-            print(f"✓ 复用已保存的{region}登录会话(无需输密码)")
-            return api
-        except Exception:
-            print(f"（已保存的{region}登录失效,需要重新登录一次）")
-
-    # Fresh login.
+def _prompt_credentials(region: str):
+    """Prompt for username/password (+ MFA callback) for ``region``. Password never stored."""
     print(f"== 登录 Garmin {region} ==")
-    email = input("Garmin 邮箱: ").strip()
+    email = input("Garmin 邮箱/手机号: ").strip()
     password = getpass.getpass("Garmin 密码(输入时屏幕不显示,输完按回车): ")
     print("若账号开了二次验证,接下来会让你输手机/邮箱收到的 6 位码(没开就直接回车跳过)。")
-    mfa_prompt = "二次验证码(没有就回车): "
-    api = Garmin(email, password, is_cn=is_cn, prompt_mfa=lambda: input(mfa_prompt).strip())
+
+    def prompt_mfa():
+        return input("二次验证码(没有就回车): ").strip()
+
+    return email, password, prompt_mfa
+
+
+def _cn_connectapi(path, **kwargs):
+    """``garth.connectapi`` wrapper: a 404 (no data for that day) returns ``None`` instead
+    of raising, so a multi-year daily pull doesn't die on days that predate your data.
+    Real auth failures (401/403) still propagate."""
+    import garth
+    from garth.exc import GarthHTTPError
+
+    try:
+        return garth.connectapi(path, **kwargs)
+    except GarthHTTPError as exc:
+        resp = getattr(getattr(exc, "error", None), "response", None)
+        if getattr(resp, "status_code", None) == 404:
+            return None
+        raise
+
+
+def _get_api_cn(garth_home: str):
+    """Authenticate against Garmin China via garth and return a garminconnect-compatible
+    adapter (:class:`~garmin_nof1.pipeline.garth_cn.GarthCnApi`).
+
+    garminconnect 0.3.2 can't authenticate China data calls (its DI-token exchange is
+    hardcoded to global ``.com`` hosts -> 403 from ``connectapi.garmin.cn``). garth speaks
+    China's OAuth correctly, auto-refreshes tokens, and persists them — so a saved session
+    resumes without a password.
+    """
+    import garth
+
+    from garmin_nof1.pipeline.garth_cn import GarthCnApi
+
+    prof = None
+    if os.path.isdir(garth_home):  # try to resume a saved session and prove it still works
+        try:
+            garth.resume(garth_home)
+            prof = garth.connectapi("/userprofile-service/socialProfile")
+        except Exception:
+            prof = None
+
+    if prof:
+        print("✓ 复用已保存的中国区登录会话(无需输密码)")
+    else:
+        email, password, prompt_mfa = _prompt_credentials("中国区(走 garth)")
+        garth.configure(domain="garmin.cn")
+        garth.login(email, password, prompt_mfa=prompt_mfa)
+        try:
+            garth.save(garth_home)
+            print("✓ 中国区登录成功,会话已保存,下次运行免密")
+        except Exception:
+            print("✓ 中国区登录成功")
+        prof = garth.connectapi("/userprofile-service/socialProfile")
+
+    display_name = (prof or {}).get("displayName")
+    if not display_name:
+        raise SystemExit("拿不到中国区账号的 displayName(sleep/rhr 接口需要它),登录可能没成功。")
+    return GarthCnApi(
+        connectapi=_cn_connectapi, download=garth.download, display_name=display_name
+    )
+
+
+def _get_api_intl(tokenstore: str):
+    """Authenticate against global Garmin (connect.garmin.com) via garminconnect, resuming a
+    saved DI-token session when present."""
+    from garminconnect import Garmin
+
+    token_file = os.path.join(tokenstore, "garmin_tokens.json")
+    if os.path.isfile(token_file):
+        try:
+            api = Garmin(is_cn=False)
+            api.login(tokenstore)
+            print("✓ 复用已保存的国际区登录会话(无需输密码)")
+            return api
+        except Exception:
+            print("（已保存的国际区登录失效,需要重新登录一次）")
+
+    email, password, prompt_mfa = _prompt_credentials("国际区")
+    api = Garmin(email, password, is_cn=False, prompt_mfa=prompt_mfa)
     api.login()
     try:
         os.makedirs(tokenstore, exist_ok=True)
-        api.garth.dump(tokenstore)
-        print(f"✓ {region}登录成功,会话已保存,下次运行免密")
+        api.client.dump(tokenstore)
+        print("✓ 国际区登录成功,会话已保存,下次运行免密")
     except Exception:
-        print(f"✓ {region}登录成功")
+        print("✓ 国际区登录成功")
     return api
+
+
+def get_api(is_cn: bool, tokenstore: str):
+    """Return an authenticated client exposing garminconnect's method surface.
+
+    China and global Garmin use different auth backends (garth vs garminconnect — see the
+    two helpers), but both return an object ``GarminClient`` can drive identically.
+    """
+    return _get_api_cn(tokenstore) if is_cn else _get_api_intl(tokenstore)
 
 
 def _peek(obj, depth=0, maxdepth=3):
