@@ -208,6 +208,11 @@ def main():
         default=None,
         help="存档目录(默认:国际区 data/raw,中国区 data/raw_cn —— 两个账号自动分开存)",
     )
+    parser.add_argument(
+        "--fits",
+        action="store_true",
+        help="额外下载该范围内活动的原始 FIT(含逐拍 RR,D 层测量验证用;较慢)",
+    )
     args = parser.parse_args()
 
     end = args.end or today.isoformat()
@@ -225,6 +230,19 @@ def main():
     counts = client.ingest_range(start, end)
     print("完成。本次新拉取条数:", counts)
     print("原始文件在:", config.raw_dir.resolve())
+
+    if args.fits:
+        from garmin_nof1.pipeline.ingest_garmin import activity_ids_in_range
+
+        acts = []
+        for path in sorted(glob.glob(os.path.join(raw_dir, "activities-*.json"))):
+            acts.extend(json.loads(open(path).read()))
+        ids = activity_ids_in_range(acts, start, end)
+        print(f"\n下载该范围内 {len(ids)} 个活动的原始 FIT(含逐拍 RR)...(慢,可中断重跑)")
+        existing = {p.stem for p in (config.raw_dir / "activities").glob("*.fit")}
+        todo = [i for i in ids if str(i) not in existing]
+        paths = client.download_activity_fits(todo) if todo else []
+        print(f"本次新下载 {len(paths)} 个 .fit(已有 {len(existing)} 个)-> {raw_dir}/activities/")
 
     show_samples(config.raw_dir)
 

@@ -18,11 +18,33 @@ import json
 import os
 import time
 import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date as _date
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
+
+
+def activity_ids_in_range(activities: Iterable[dict], start: str, end: str) -> list[int]:
+    """Activity ids whose local start date is within ``[start, end]`` (inclusive, ``YYYY-MM-DD``).
+
+    Reads ``activityId`` and ``startTimeLocal`` (``"YYYY-MM-DD HH:MM:SS"``) from each archived
+    activity; entries missing either, or outside the window, are skipped. Order is preserved and
+    duplicate ids (e.g. a multisport day with several sessions) are de-duplicated to first sight.
+    Used to pick which activities to fetch FITs for (the D-layer chest-strap window).
+    """
+    out: list[int] = []
+    seen: set[int] = set()
+    for act in activities:
+        aid = act.get("activityId")
+        stamp = act.get("startTimeLocal")
+        if aid is None or not stamp:
+            continue
+        if start <= str(stamp)[:10] <= end and aid not in seen:
+            seen.add(aid)
+            out.append(aid)
+    return out
 
 
 def with_backoff(

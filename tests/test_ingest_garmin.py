@@ -8,9 +8,30 @@ import pytest
 from garmin_nof1.pipeline.ingest_garmin import (
     GarminClient,
     GarminConfig,
+    activity_ids_in_range,
     archive_raw,
     with_backoff,
 )
+
+
+def test_activity_ids_in_range_filters_by_local_date():
+    acts = [
+        {"activityId": 1, "startTimeLocal": "2024-03-01 07:00:00"},
+        {"activityId": 2, "startTimeLocal": "2024-04-15 18:30:00"},
+        {"activityId": 3, "startTimeLocal": "2024-06-01 06:00:00"},
+        {"activityId": 4},  # no start stamp -> skipped
+        {"startTimeLocal": "2024-04-10 10:00:00"},  # no id -> skipped
+    ]
+    assert activity_ids_in_range(acts, "2024-04-01", "2024-05-31") == [2]
+
+
+def test_activity_ids_in_range_dedups_and_preserves_order():
+    acts = [
+        {"activityId": 9, "startTimeLocal": "2024-04-02 07:00:00"},
+        {"activityId": 7, "startTimeLocal": "2024-04-03 07:00:00"},
+        {"activityId": 9, "startTimeLocal": "2024-04-02 19:00:00"},  # duplicate id (two sessions)
+    ]
+    assert activity_ids_in_range(acts, "2024-04-01", "2024-04-30") == [9, 7]
 
 
 def test_with_backoff_retries_then_succeeds():
