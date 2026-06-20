@@ -13,7 +13,22 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-SPORTS = ("triathlon", "soccer")
+SPORTS = ("triathlon", "soccer")  # the H-A1/H-A2 headline contrast pair
+
+
+def modeled_sports(sport) -> list[str]:
+    """Ordered list of the non-``rest`` sports present in ``sport``.
+
+    The headline pair (``triathlon``, ``soccer``) comes first when present, then any other
+    modeled load types (e.g. ``strength``) alphabetically. Each returned sport gets its own
+    load/recovery term in the estimators, so it is estimated explicitly instead of being
+    absorbed into the ``rest`` baseline — keeping that baseline (and the triathlon-vs-soccer
+    contrast) uncontaminated. With only the headline pair present this returns
+    ``["triathlon", "soccer"]``, so the two-sport behaviour is unchanged.
+    """
+    present = {s for s in pd.unique(np.asarray(sport)) if isinstance(s, str) and s != "rest"}
+    extras = sorted(present - set(SPORTS))
+    return [s for s in SPORTS if s in present] + extras
 
 
 def deviation(df: pd.DataFrame, outcome: str, deviation_col: str | None, window: int) -> pd.Series:

@@ -72,7 +72,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from garmin_nof1.models._common import SPORTS, ci, conjugate_posterior, deviation
+from garmin_nof1.models._common import ci, conjugate_posterior, deviation, modeled_sports
 
 
 @dataclass(frozen=True)
@@ -180,34 +180,34 @@ def fit_recovery_cost(
     trimp = work["trimp"].astype(float).to_numpy()
     sport = np.asarray(work["sport"].astype(object))
 
+    # Each non-rest sport gets its own load column (data-driven): its nights are explained by
+    # its own slope and so leave the "rest" baseline uncontaminated. With only triathlon/soccer
+    # present this is exactly the original two-load design.
+    sports = modeled_sports(sport)
+    load_cols = {s: f"_load_{s}" for s in sports}
+
     # _dev_lag is a positional shift computed BEFORE dropna; because the panel is
     # contiguous daily rows, a row survives the dropna only if it and its immediately
     # preceding row are both observed -> the surviving AR pairs are true one-day lags
     # (a row whose previous night was non-wear has a NaN lag and is dropped, rather
     # than being silently paired with an earlier day).
-    work = work.assign(
-        _dev=dev.to_numpy(),
-        _dev_lag=dev.shift(1).to_numpy(),
-        _tri_load=np.where(sport == "triathlon", trimp / 100.0, 0.0),
-        _soc_load=np.where(sport == "soccer", trimp / 100.0, 0.0),
-    )
+    assigned = {"_dev": dev.to_numpy(), "_dev_lag": dev.shift(1).to_numpy()}
+    for s in sports:
+        assigned[load_cols[s]] = np.where(sport == s, trimp / 100.0, 0.0)
+    work = work.assign(**assigned)
     for cov in covariates:
         if cov not in work.columns:
             raise KeyError(f"covariate column {cov!r} not in DataFrame")
 
-    cols = ["_dev", "_dev_lag", "_tri_load", "_soc_load", *covariates]
+    cols = ["_dev", "_dev_lag", *load_cols.values(), *covariates]
     fit_df = work.dropna(subset=cols)
     if len(fit_df) < 10:
         raise ValueError("too few aligned observations to fit the recovery-cost model")
 
     y = fit_df["_dev"].to_numpy(float)
-    # columns: 0 intercept, 1 AR(1), 2 triathlon load, 3 soccer load, 4.. covariates
-    design = [
-        np.ones(len(fit_df)),
-        fit_df["_dev_lag"].to_numpy(float),
-        fit_df["_tri_load"].to_numpy(float),
-        fit_df["_soc_load"].to_numpy(float),
-    ]
+    # columns: 0 intercept, 1 AR(1), 2.. per-sport load (in ``sports`` order), then covariates
+    design = [np.ones(len(fit_df)), fit_df["_dev_lag"].to_numpy(float)]
+    design += [fit_df[load_cols[s]].to_numpy(float) for s in sports]
     for cov in covariates:
         v = fit_df[cov].to_numpy(float)
         design.append(v - v.mean())  # center so the intercept stays interpretable
@@ -216,32 +216,40 @@ def fit_recovery_cost(
     mu_n, cov_m, dof, sigma2_mean = conjugate_posterior(X, y, prior_scale)
 
     # cost = -(load coefficient): positive cost == HRV suppressed.
-    idx = {"triathlon": 2, "soccer": 3}
-    cost_slope = {s: float(-mu_n[idx[s]]) for s in SPORTS}
+    idx = {s: 2 + i for i, s in enumerate(sports)}
+    cost_slope = {s: float(-mu_n[idx[s]]) for s in sports}
     cost_slope_ci = {
         s: tuple(sorted(ci(-mu_n[idx[s]], float(np.sqrt(cov_m[idx[s], idx[s]])), dof, ci_level)))
-        for s in SPORTS
+        for s in sports
     }
 
-    # interaction = cost_soccer - cost_triathlon = mu_triathlon - mu_soccer
-    c = np.zeros(X.shape[1])
-    c[idx["triathlon"]], c[idx["soccer"]] = 1.0, -1.0
-    interaction = float(c @ mu_n)
-    inter_scale = float(np.sqrt(c @ cov_m @ c))
-    interaction_ci = ci(interaction, inter_scale, dof, ci_level)
-    prob_pos = (
-        float(stats.t.cdf(interaction / inter_scale, dof)) if inter_scale > 0 else float("nan")
-    )
-    # Pre-registered H-A1 decision (OSF §6): fixed at the 95% level, independent of ci_level.
-    lo95, hi95 = ci(interaction, inter_scale, dof, 0.95)
-    rope_excludes = bool(lo95 > rope_margin or hi95 < -rope_margin)
-    h_a1_supported = bool(prob_pos >= 0.95 and rope_excludes)
+    # Headline interaction = cost_soccer - cost_triathlon = mu_triathlon - mu_soccer.
+    # Defined only when both headline sports are present (always so on the real/synthetic panel).
+    if "triathlon" in idx and "soccer" in idx:
+        c = np.zeros(X.shape[1])
+        c[idx["triathlon"]], c[idx["soccer"]] = 1.0, -1.0
+        interaction = float(c @ mu_n)
+        inter_scale = float(np.sqrt(c @ cov_m @ c))
+        interaction_ci = ci(interaction, inter_scale, dof, ci_level)
+        prob_pos = (
+            float(stats.t.cdf(interaction / inter_scale, dof)) if inter_scale > 0 else float("nan")
+        )
+        # Pre-registered H-A1 decision (OSF §6): fixed at the 95% level, independent of ci_level.
+        lo95, hi95 = ci(interaction, inter_scale, dof, 0.95)
+        rope_excludes = bool(lo95 > rope_margin or hi95 < -rope_margin)
+        h_a1_supported = bool(prob_pos >= 0.95 and rope_excludes)
+    else:
+        interaction = float("nan")
+        interaction_ci = (float("nan"), float("nan"))
+        prob_pos = float("nan")
+        rope_excludes = False
+        h_a1_supported = False
 
     phi = float(mu_n[1])
     tau_days = float(-1.0 / np.log(phi)) if 0.0 < phi < 1.0 else float("nan")
 
     sport_used = fit_df["sport"].astype(object)
-    n = {s: int((sport_used == s).sum()) for s in SPORTS}
+    n = {s: int((sport_used == s).sum()) for s in sports}
 
     return RecoveryCostFit(
         cost_slope=cost_slope,

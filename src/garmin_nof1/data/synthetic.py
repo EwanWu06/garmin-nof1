@@ -42,7 +42,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-SPORTS = ("rest", "triathlon", "soccer")
+SPORTS = ("rest", "triathlon", "soccer", "strength")
 
 
 @dataclass(frozen=True)
@@ -68,6 +68,8 @@ class GroundTruth:
     seasonal_amp: float = 0.15  # amplitude of the annual fitness/seasonal drift
     phi_soccer: float | None = None  # post-soccer recovery persistence (defaults to phi)
     phi_triathlon: float | None = None  # post-triathlon recovery persistence (defaults to phi)
+    beta_strength: float | None = None  # cost per 100 TRIMP after strength (None -> no cost)
+    phi_strength: float | None = None  # post-strength recovery persistence (defaults to phi)
 
     @property
     def tau_days(self) -> float:
@@ -82,6 +84,8 @@ class GroundTruth:
             return self.phi_soccer
         if sport == "triathlon" and self.phi_triathlon is not None:
             return self.phi_triathlon
+        if sport == "strength" and self.phi_strength is not None:
+            return self.phi_strength
         return self.phi
 
     @property
@@ -93,12 +97,19 @@ class GroundTruth:
         return -1.0 / np.log(self.phi_for("triathlon"))
 
     def beta(self, sport: str) -> float:
-        return {"rest": 0.0, "triathlon": self.beta_triathlon, "soccer": self.beta_soccer}[sport]
+        return {
+            "rest": 0.0,
+            "triathlon": self.beta_triathlon,
+            "soccer": self.beta_soccer,
+            "strength": self.beta_strength or 0.0,
+        }[sport]
 
 
-def _draw_sport(rng: np.random.Generator, t: int) -> str:
+def _draw_sport(rng: np.random.Generator, t: int, p_strength: float = 0.0) -> str:
     """Stochastic daily schedule: triathlon near-daily; soccer ~1-2x/week and
-    seasonal (more in-season); the rest are rest days."""
+    seasonal (more in-season); strength on a ``p_strength`` fraction of the otherwise-rest
+    days; the rest are rest days. ``p_strength=0`` reproduces the original schedule
+    bit-for-bit — the strength branch is never reached, so the RNG stream is unchanged."""
     season = 0.5 * (1 + np.sin(2 * np.pi * (t / 365.0)))  # 0..1 annual cycle
     p_soccer = 0.04 + 0.16 * season  # 4% off-season -> 20% in-season
     u = rng.random()
@@ -106,6 +117,8 @@ def _draw_sport(rng: np.random.Generator, t: int) -> str:
         return "soccer"
     if u < p_soccer + 0.60:
         return "triathlon"
+    if u < p_soccer + 0.60 + p_strength:
+        return "strength"
     return "rest"
 
 
@@ -114,6 +127,8 @@ def _draw_trimp(rng: np.random.Generator, sport: str) -> float:
         return float(rng.gamma(shape=6.0, scale=15.0))  # mean ~ 90
     if sport == "soccer":
         return float(rng.gamma(shape=5.0, scale=14.0))  # mean ~ 70 (observed)
+    if sport == "strength":
+        return float(rng.gamma(shape=4.0, scale=10.0))  # mean ~ 40 (HR-based TRIMP runs low)
     return 0.0
 
 
@@ -123,6 +138,7 @@ def make_daily_panel(
     gt: GroundTruth | None = None,
     missing_rate: float = 0.08,
     start: str = "2023-01-01",
+    p_strength: float = 0.0,
 ) -> pd.DataFrame:
     """Generate a tidy daily panel with known structure.
 
@@ -132,6 +148,12 @@ def make_daily_panel(
     ``ln_rmssd`` (and ``rhr``) are set to NaN on a random ``missing_rate`` of
     nights to mimic non-wear; ``hrv_observed`` flags it. ``sport`` and ``trimp``
     are always known (you know what you trained).
+
+    ``p_strength`` injects a third modeled load type ("strength") on that fraction of
+    otherwise-rest days, with its own cost (``gt.beta_strength``) and recovery persistence
+    (``gt.phi_strength``). It defaults to 0 — no strength days, schedule unchanged — and is
+    used to exercise the multi-sport estimators (strength must be modeled explicitly, not
+    folded into the rest baseline).
     """
     gt = gt or GroundTruth()
     rng = np.random.default_rng(seed)
@@ -140,7 +162,7 @@ def make_daily_panel(
     sport = np.empty(n_days, dtype=object)
     trimp = np.zeros(n_days)
     for t in range(n_days):
-        sport[t] = _draw_sport(rng, t)
+        sport[t] = _draw_sport(rng, t, p_strength)
         trimp[t] = _draw_trimp(rng, sport[t])
 
     t_idx = np.arange(n_days)

@@ -111,15 +111,53 @@ def test_map_sport_groups_endurance_and_soccer():
     assert map_sport("running") == "triathlon"
     assert map_sport("lap_swimming") == "triathlon"
     assert map_sport("road_biking") == "triathlon"
+    assert map_sport("multi_sport") == "triathlon"  # multisport races/bricks are endurance
     assert map_sport("soccer") == "soccer"
-    assert map_sport("strength_training") == "rest"  # unmodeled -> no session
+
+
+def test_map_sport_strength_is_its_own_category():
+    # Strength is modeled (kept out of the rest baseline); pure non-training movement is rest.
+    assert map_sport("strength_training") == "strength"
+    assert map_sport("walking") == "rest"
+    assert map_sport("hiking") == "rest"
+
+
+def test_strength_day_survives_panel_assembly():
+    # "strength" must be a valid category, not coerced to NaN by the Categorical.
+    df = assemble_panel(
+        [
+            {
+                "date": "2024-01-01",
+                "sport": "strength",
+                "trimp": 40.0,
+                "sleep_hours": 7.0,
+                "rhr": 50.0,
+                "ln_rmssd": np.log(50.0),
+            }
+        ]
+    )
+    assert df.iloc[0]["sport"] == "strength"
+
+
+def test_daily_fold_labels_strength_only_day_and_endurance_wins_mixed():
+    activities = [
+        {"date": "2024-06-01", "sport_key": "strength_training", "hr_avg": 110, "duration_min": 45},
+        {"date": "2024-06-02", "sport_key": "strength_training", "hr_avg": 115, "duration_min": 30},
+        {"date": "2024-06-02", "sport_key": "running", "hr_avg": 150, "duration_min": 50},
+    ]
+    folded = daily_sport_and_trimp(activities, hr_rest=50, hr_max=200, sex="M")
+    assert folded["2024-06-01"]["sport"] == "strength"  # strength-only day keeps its label
+    assert folded["2024-06-02"]["sport"] == "triathlon"  # endurance outranks strength
+    # the mixed day still sums load from BOTH sessions
+    expected = banister_trimp(30, 115, 50, 200, "M") + banister_trimp(50, 150, 50, 200, "M")
+    assert abs(folded["2024-06-02"]["trimp"] - expected) < 1e-9
 
 
 def test_daily_fold_priority_soccer_and_sums_trimp():
     activities = [
         {"date": "2024-05-01", "sport_key": "running", "hr_avg": 150, "duration_min": 60},
         {"date": "2024-05-01", "sport_key": "soccer", "hr_avg": 160, "duration_min": 90},
-        {"date": "2024-05-02", "sport_key": "strength_training", "hr_avg": 110, "duration_min": 40},
+        {"date": "2024-05-02", "sport_key": "walking", "hr_avg": 110, "duration_min": 40},
     ]
     folded = daily_sport_and_trimp(activities, hr_rest=50, hr_max=200, sex="M")
     d1 = folded["2024-05-01"]
@@ -127,7 +165,7 @@ def test_daily_fold_priority_soccer_and_sums_trimp():
     expected = banister_trimp(60, 150, 50, 200, "M") + banister_trimp(90, 160, 50, 200, "M")
     assert abs(d1["trimp"] - expected) < 1e-9
     d2 = folded["2024-05-02"]
-    assert d2["sport"] == "rest" and d2["trimp"] == 0.0  # only unmodeled activity
+    assert d2["sport"] == "rest" and d2["trimp"] == 0.0  # only an unmapped (non-training) activity
 
 
 def test_classify_missingness_flags_nonwear():

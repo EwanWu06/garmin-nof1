@@ -28,7 +28,7 @@ from garmin_nof1.pipeline.garmin_schema import (
 from garmin_nof1.pipeline.trimp import banister_trimp
 
 SCHEMA_COLUMNS = ["date", "sport", "trimp", "sleep_hours", "rhr", "ln_rmssd", "hrv_observed"]
-_SPORT_CATEGORIES = ["rest", "triathlon", "soccer"]
+_SPORT_CATEGORIES = ["rest", "triathlon", "soccer", "strength"]
 
 
 def ln_rmssd_from_rmssd(rmssd_value) -> float:
@@ -75,9 +75,12 @@ def assemble_panel(records: Iterable[dict], *, start=None, end=None) -> pd.DataF
     return df[SCHEMA_COLUMNS]
 
 
-# Garmin activityType.typeKey -> modeled sport. Endurance triathlon disciplines collapse
-# to "triathlon"; soccer/football to "soccer"; everything else is an unmodeled session
-# that contributes no triathlon/soccer load (treated as "rest" for the panel label).
+# Garmin activityType.typeKey -> modeled sport. Endurance triathlon disciplines (incl.
+# multisport races/bricks) collapse to "triathlon"; soccer/football to "soccer". Strength
+# training is its own modeled load type ("strength") — deliberately NOT folded into "rest",
+# because it carries real autonomic load and would otherwise contaminate the recovery-cost
+# baseline. Low-intensity, non-training movement (walking, hiking, ...) stays unmapped and
+# is treated as "rest" (a true low-load day) for the panel label.
 _SPORT_MAP = {
     "running": "triathlon",
     "track_running": "triathlon",
@@ -91,8 +94,10 @@ _SPORT_MAP = {
     "swimming": "triathlon",
     "lap_swimming": "triathlon",
     "open_water_swimming": "triathlon",
+    "multi_sport": "triathlon",
     "soccer": "soccer",
     "football": "soccer",
+    "strength_training": "strength",
 }
 
 
@@ -112,13 +117,17 @@ def daily_sport_and_trimp(
     """Fold per-activity summaries into per-day ``{date: {"sport", "trimp"}}``.
 
     The day's label is the highest-priority modeled sport present (soccer > triathlon >
-    rest); ``trimp`` sums Banister TRIMP over the day's modeled (triathlon/soccer)
-    sessions. Each activity dict needs ``date, sport_key, hr_avg, duration_min``.
+    strength > rest); ``trimp`` sums Banister TRIMP over the day's modeled (triathlon/
+    soccer/strength) sessions. Each activity dict needs ``date, sport_key, hr_avg,
+    duration_min``.
 
     TRIMP is summed across ALL modeled sessions regardless of which sport wins the label
-    (a "bricks" day — e.g. run + soccer — contributes load from both).
+    (a mixed day — e.g. run + strength, or run + soccer — contributes load from both).
+    The priority puts the endurance/team session above strength, so a "lift + ride" day
+    is labelled triathlon (its dominant stimulus) while a strength-only day is labelled
+    strength rather than disappearing into the rest baseline.
     """
-    priority = {"rest": 0, "triathlon": 1, "soccer": 2}
+    priority = {"rest": 0, "strength": 1, "triathlon": 2, "soccer": 3}
     out: dict[str, dict] = {}
     for act in activities:
         date = str(act["date"])

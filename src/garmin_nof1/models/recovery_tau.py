@@ -59,7 +59,12 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from garmin_nof1.models._common import SPORTS, conjugate_posterior, deviation, sample_mvt
+from garmin_nof1.models._common import (
+    conjugate_posterior,
+    deviation,
+    modeled_sports,
+    sample_mvt,
+)
 
 
 @dataclass(frozen=True)
@@ -139,64 +144,75 @@ def fit_recovery_tau(
     regime = session.ffill().shift(1).to_numpy()
     dev_lag = dev.shift(1).to_numpy()
 
-    work = work.assign(
-        _dev=dev.to_numpy(),
-        _dev_lag=dev_lag,
-        _regime=regime,
-        _ar_tri=np.where(regime == "triathlon", dev_lag, 0.0),
-        _ar_soc=np.where(regime == "soccer", dev_lag, 0.0),
-        _tri_load=np.where(sport_arr == "triathlon", trimp / 100.0, 0.0),
-        _soc_load=np.where(sport_arr == "soccer", trimp / 100.0, 0.0),
-    )
+    # Each non-rest sport gets its own recovery regime (interacted lag) AND load column, so
+    # post-strength recovery is no longer mis-attributed to the last triathlon/soccer regime.
+    # With only triathlon/soccer present this is exactly the original two-regime design.
+    sports = modeled_sports(sport_arr)
+    ar_cols = {s: f"_ar_{s}" for s in sports}
+    load_cols = {s: f"_load_{s}" for s in sports}
 
-    cols = ["_dev", "_dev_lag", "_regime", "_tri_load", "_soc_load"]
+    assigned = {"_dev": dev.to_numpy(), "_dev_lag": dev_lag, "_regime": regime}
+    for s in sports:
+        assigned[ar_cols[s]] = np.where(regime == s, dev_lag, 0.0)
+        assigned[load_cols[s]] = np.where(sport_arr == s, trimp / 100.0, 0.0)
+    work = work.assign(**assigned)
+
+    cols = ["_dev", "_dev_lag", "_regime", *ar_cols.values(), *load_cols.values()]
     fit_df = work.dropna(subset=cols)
     if len(fit_df) < 30:
         raise ValueError("too few aligned observations to fit the per-sport recovery model")
 
     y = fit_df["_dev"].to_numpy(float)
-    # columns: 0 intercept, 1 phi_triathlon, 2 phi_soccer, 3 triathlon load, 4 soccer load
-    X = np.column_stack(
-        [
-            np.ones(len(fit_df)),
-            fit_df["_ar_tri"].to_numpy(float),
-            fit_df["_ar_soc"].to_numpy(float),
-            fit_df["_tri_load"].to_numpy(float),
-            fit_df["_soc_load"].to_numpy(float),
-        ]
-    )
-    mu_n, cov_m, dof, _ = conjugate_posterior(X, y, prior_scale)
-    phi_col = {"triathlon": 1, "soccer": 2}
-    phi_mean = {s: float(mu_n[phi_col[s]]) for s in SPORTS}
+    # columns: 0 intercept, 1.. per-sport phi (in ``sports`` order), then per-sport load.
+    design = [np.ones(len(fit_df))]
+    design += [fit_df[ar_cols[s]].to_numpy(float) for s in sports]
+    design += [fit_df[load_cols[s]].to_numpy(float) for s in sports]
+    X = np.column_stack(design)
 
-    # Propagate the joint (phi_tri, phi_soc) posterior to tau via Monte-Carlo.
+    mu_n, cov_m, dof, _ = conjugate_posterior(X, y, prior_scale)
+    phi_col = {s: 1 + i for i, s in enumerate(sports)}
+    phi_mean = {s: float(mu_n[phi_col[s]]) for s in sports}
+
+    # Propagate the joint phi posterior to tau via Monte-Carlo.
     rng = np.random.default_rng(seed)
     draws = sample_mvt(mu_n, cov_m, dof, n_draws, rng)
-    phi_t = draws[:, phi_col["triathlon"]]
-    phi_s = draws[:, phi_col["soccer"]]
-    ok = (phi_t > 0.0) & (phi_t < 1.0) & (phi_s > 0.0) & (phi_s < 1.0)
-    tau_t = -1.0 / np.log(phi_t[ok])
-    tau_s = -1.0 / np.log(phi_s[ok])
-    tau_diff_draws = tau_s - tau_t
-
     lo_q, hi_q = (1.0 - ci_level) / 2.0, (1.0 + ci_level) / 2.0
-    tau = {"triathlon": float(np.mean(tau_t)), "soccer": float(np.mean(tau_s))}
-    tau_ci = {
-        "triathlon": (float(np.quantile(tau_t, lo_q)), float(np.quantile(tau_t, hi_q))),
-        "soccer": (float(np.quantile(tau_s, lo_q)), float(np.quantile(tau_s, hi_q))),
-    }
-    tau_diff = float(np.mean(tau_diff_draws))
-    tau_diff_ci = (
-        float(np.quantile(tau_diff_draws, lo_q)),
-        float(np.quantile(tau_diff_draws, hi_q)),
-    )
-    prob_longer = float(np.mean(tau_diff_draws > 0.0))
-    # Pre-registered H-A2 decision (OSF §6): 95% CrI of the difference excludes 0.
-    d_lo, d_hi = np.quantile(tau_diff_draws, [0.025, 0.975])
-    h_a2_supported = bool(d_lo > 0.0 or d_hi < 0.0)
+
+    # Per-sport tau from the draws where that sport's phi is a valid recovery rate in (0, 1).
+    tau, tau_ci, phi_draws, ok_draws = {}, {}, {}, {}
+    for s in sports:
+        ph = draws[:, phi_col[s]]
+        ok_s = (ph > 0.0) & (ph < 1.0)
+        phi_draws[s], ok_draws[s] = ph, ok_s
+        tau_s_draws = -1.0 / np.log(ph[ok_s])
+        tau[s] = float(np.mean(tau_s_draws))
+        tau_ci[s] = (float(np.quantile(tau_s_draws, lo_q)), float(np.quantile(tau_s_draws, hi_q)))
+
+    # Headline tau difference (soccer - triathlon), on draws where BOTH phis are valid.
+    if "triathlon" in phi_col and "soccer" in phi_col:
+        both = ok_draws["triathlon"] & ok_draws["soccer"]
+        tau_t = -1.0 / np.log(phi_draws["triathlon"][both])
+        tau_s = -1.0 / np.log(phi_draws["soccer"][both])
+        tau_diff_draws = tau_s - tau_t
+        tau_diff = float(np.mean(tau_diff_draws))
+        tau_diff_ci = (
+            float(np.quantile(tau_diff_draws, lo_q)),
+            float(np.quantile(tau_diff_draws, hi_q)),
+        )
+        prob_longer = float(np.mean(tau_diff_draws > 0.0))
+        # Pre-registered H-A2 decision (OSF §6): 95% CrI of the difference excludes 0.
+        d_lo, d_hi = np.quantile(tau_diff_draws, [0.025, 0.975])
+        h_a2_supported = bool(d_lo > 0.0 or d_hi < 0.0)
+        n_draws_used = int(both.sum())
+    else:
+        tau_diff = float("nan")
+        tau_diff_ci = (float("nan"), float("nan"))
+        prob_longer = float("nan")
+        h_a2_supported = False
+        n_draws_used = 0
 
     regime_used = fit_df["_regime"]
-    n_regime = {s: int((regime_used == s).sum()) for s in SPORTS}
+    n_regime = {s: int((regime_used == s).sum()) for s in sports}
 
     return RecoveryTauFit(
         tau=tau,
@@ -208,5 +224,5 @@ def fit_recovery_tau(
         phi=phi_mean,
         n_regime=n_regime,
         n_obs=len(fit_df),
-        n_draws_used=int(ok.sum()),
+        n_draws_used=n_draws_used,
     )
