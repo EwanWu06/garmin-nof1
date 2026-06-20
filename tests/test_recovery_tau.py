@@ -72,3 +72,17 @@ def test_reports_regime_counts():
     df, _ = _panel_per_sport_tau()
     res = fit_recovery_tau(df, deviation_col="dev_true")
     assert res.n_regime["soccer"] > 0 and res.n_regime["triathlon"] > 0
+
+
+def test_load_lag_equals_preshifting_the_sessions():
+    # load_lag=k must be exactly equivalent to manually shifting each session k days forward
+    # (load shifts by k, the recovery regime by k+1).
+    df, _ = _panel_per_sport_tau()
+    pre = df.copy()
+    pre["sport"] = df["sport"].astype(object).shift(1)
+    pre["trimp"] = df["trimp"].shift(1)
+    a = fit_recovery_tau(df, deviation_col="dev_true", load_lag=1)
+    b = fit_recovery_tau(pre, deviation_col="dev_true", load_lag=0)
+    for s in ("triathlon", "soccer"):
+        assert abs(a.phi[s] - b.phi[s]) < 1e-9
+        assert abs(a.tau[s] - b.tau[s]) < 1e-6

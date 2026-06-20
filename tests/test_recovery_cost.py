@@ -4,6 +4,7 @@ on synthetic data, and a negative control (sleep) must show no sport interaction
 """
 
 import numpy as np
+import pandas as pd
 
 from garmin_nof1.data.synthetic import GroundTruth, make_daily_panel
 from garmin_nof1.models import fit_recovery_cost
@@ -80,6 +81,47 @@ def test_higher_ci_level_widens_interval():
     w95 = res95.interaction_ci[1] - res95.interaction_ci[0]
     w99 = res99.interaction_ci[1] - res99.interaction_ci[0]
     assert w99 > w95
+
+
+def test_load_lag_recovers_a_next_night_effect_that_same_night_alignment_misses():
+    # Real Garmin overnight HRV is morning-timestamped, so a day's training first lands on
+    # the NEXT night. Plant exactly that and check load_lag=1 recovers the cost; load_lag=0
+    # (same-night alignment) sees ~nothing.
+    rng = np.random.default_rng(0)
+    n = 500
+    sport = np.where(rng.random(n) < 0.5, "triathlon", "rest")
+    trimp = np.where(sport == "triathlon", rng.uniform(50, 120, n), 0.0)
+    load = trimp / 100.0
+    dev = np.zeros(n)
+    dev[1:] = -0.08 * load[:-1] + rng.normal(0, 0.02, n - 1)  # today's load -> tomorrow's dev
+    df = pd.DataFrame(
+        {
+            "date": pd.date_range("2023-01-01", periods=n),
+            "sport": pd.Categorical(sport, categories=["rest", "triathlon", "soccer", "strength"]),
+            "trimp": trimp,
+            "ln_rmssd": 4.0 + dev,
+            "dev_true": dev,
+            "sleep_hours": 7.0,
+            "rhr": 50.0,
+            "hrv_observed": True,
+        }
+    )
+    aligned = fit_recovery_cost(df, deviation_col="dev_true", load_lag=1)
+    misaligned = fit_recovery_cost(df, deviation_col="dev_true", load_lag=0)
+    assert abs(aligned.cost_slope["triathlon"] - 0.08) < 0.02  # recovers the planted cost
+    assert abs(misaligned.cost_slope["triathlon"]) < 0.03  # same-night alignment sees ~nothing
+
+
+def test_load_lag_equals_preshifting_the_sessions():
+    # load_lag=k must be exactly equivalent to manually shifting each session k days forward.
+    df, _ = _panel_with_true_deviation()
+    pre = df.copy()
+    pre["sport"] = df["sport"].astype(object).shift(1)
+    pre["trimp"] = df["trimp"].shift(1)
+    a = fit_recovery_cost(df, deviation_col="dev_true", load_lag=1)
+    b = fit_recovery_cost(pre, deviation_col="dev_true", load_lag=0)
+    for s in ("triathlon", "soccer"):
+        assert abs(a.cost_slope[s] - b.cost_slope[s]) < 1e-9
 
 
 def test_irrelevant_covariate_leaves_interaction_conclusion():

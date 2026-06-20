@@ -141,6 +141,7 @@ def fit_recovery_cost(
     prior_scale: float = 10.0,
     ci_level: float = 0.95,
     rope_margin: float = 0.02,
+    load_lag: int = 0,
 ) -> RecoveryCostFit:
     """Estimate the per-sport recovery cost and the sport × load interaction.
 
@@ -173,6 +174,13 @@ def fit_recovery_cost(
         The H-A1 ROPE decision is always evaluated at 95% per the preregistration.
     rope_margin : float
         ROPE half-width (ln-units per 100 TRIMP) for the H-A1 decision (OSF §6: ±0.02).
+    load_lag : int
+        Number of days by which a session's load is shifted forward onto the HRV night it
+        first affects. ``0`` (default) aligns day-*t* load with the same-row deviation — the
+        convention of the synthetic DGP. Real Garmin overnight HRV is timestamped to the
+        morning, so a day's training first lands on the *next* night: use ``load_lag=1`` on
+        real panels. (Mis-aligning load to the same night captures the "train-when-recovered"
+        behavioural confound instead of the recovery cost — see ``preregistration``.)
     """
     covariates = list(covariates or [])
     work = df.copy()
@@ -183,6 +191,8 @@ def fit_recovery_cost(
     # Each non-rest sport gets its own load column (data-driven): its nights are explained by
     # its own slope and so leave the "rest" baseline uncontaminated. With only triathlon/soccer
     # present this is exactly the original two-load design.
+    if load_lag < 0:
+        raise ValueError("load_lag must be >= 0")
     sports = modeled_sports(sport)
     load_cols = {s: f"_load_{s}" for s in sports}
 
@@ -190,10 +200,12 @@ def fit_recovery_cost(
     # contiguous daily rows, a row survives the dropna only if it and its immediately
     # preceding row are both observed -> the surviving AR pairs are true one-day lags
     # (a row whose previous night was non-wear has a NaN lag and is dropped, rather
-    # than being silently paired with an earlier day).
+    # than being silently paired with an earlier day). Each load column is shifted forward
+    # by ``load_lag`` so a day's session is matched to the HRV night it first affects.
     assigned = {"_dev": dev.to_numpy(), "_dev_lag": dev.shift(1).to_numpy()}
     for s in sports:
-        assigned[load_cols[s]] = np.where(sport == s, trimp / 100.0, 0.0)
+        load = np.where(sport == s, trimp / 100.0, 0.0)
+        assigned[load_cols[s]] = pd.Series(load).shift(load_lag).to_numpy()
     work = work.assign(**assigned)
     for cov in covariates:
         if cov not in work.columns:

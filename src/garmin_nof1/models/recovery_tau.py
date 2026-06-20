@@ -118,6 +118,7 @@ def fit_recovery_tau(
     ci_level: float = 0.95,
     n_draws: int = 20_000,
     seed: int = 0,
+    load_lag: int = 0,
 ) -> RecoveryTauFit:
     """Estimate the per-sport recovery time-constant τ and the τ difference (H-A2).
 
@@ -132,16 +133,26 @@ def fit_recovery_tau(
     n_draws, seed :
         Monte-Carlo draws (and RNG seed for determinism) used to propagate the joint
         coefficient posterior to the nonlinear ``τ = -1/ln(phi)``.
+    load_lag : int
+        Days by which a session is shifted forward onto the HRV night it first affects (as in
+        :func:`garmin_nof1.models.fit_recovery_cost`). ``0`` (default) is the synthetic-DGP
+        convention; real Garmin HRV is morning-timestamped, so use ``load_lag=1`` — the load
+        terms shift by one day and the recovery regime by one further day (the deviation a
+        session leaves appears one night later and only then begins to decay).
     """
+    if load_lag < 0:
+        raise ValueError("load_lag must be >= 0")
     work = df.copy()
     dev = deviation(work, outcome, deviation_col, detrend_window)
     sport = work["sport"].astype(object)
     sport_arr = np.asarray(sport)
     trimp = work["trimp"].astype(float).to_numpy()
 
-    # Recovery regime = sport of the most recent session strictly before each day.
+    # Recovery regime = sport of the session whose deviation is currently decaying: the most
+    # recent session strictly before each day, shifted a further ``load_lag`` days because a
+    # session's deviation only appears (and starts decaying) ``load_lag`` nights later.
     session = sport.where(sport != "rest")
-    regime = session.ffill().shift(1).to_numpy()
+    regime = session.ffill().shift(1 + load_lag).to_numpy()
     dev_lag = dev.shift(1).to_numpy()
 
     # Each non-rest sport gets its own recovery regime (interacted lag) AND load column, so
@@ -154,7 +165,8 @@ def fit_recovery_tau(
     assigned = {"_dev": dev.to_numpy(), "_dev_lag": dev_lag, "_regime": regime}
     for s in sports:
         assigned[ar_cols[s]] = np.where(regime == s, dev_lag, 0.0)
-        assigned[load_cols[s]] = np.where(sport_arr == s, trimp / 100.0, 0.0)
+        load = np.where(sport_arr == s, trimp / 100.0, 0.0)
+        assigned[load_cols[s]] = pd.Series(load).shift(load_lag).to_numpy()
     work = work.assign(**assigned)
 
     cols = ["_dev", "_dev_lag", "_regime", *ar_cols.values(), *load_cols.values()]
