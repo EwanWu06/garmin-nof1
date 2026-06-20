@@ -145,3 +145,53 @@ estimated. The held-out final 20% has not been inspected at all.
 The analysis pipeline and the leakage-safe CV scaffold are versioned in git; the repository
 will be frozen at a named commit (hash recorded here on submission) before any outcome model
 is fit. The CV scaffold is already validated on synthetic data (test suite passing).
+
+## 13. Deviations & amendments (append-only log)
+
+This section is **append-only**: the original plan above is preserved verbatim; every
+post-draft change to the analysis, and every departure from the plan, is logged here with a
+date and the commit that implements it. Honesty about what actually happened is preferred to
+a clean-looking record (cf. §1).
+
+**A1 — Load↔HRV alignment correction (2026-06-19, commit `a837c13`).**
+The §5 model formula `Δlndev[t+1] ~ sport*TRIMP[t]` specifies **next-night** alignment (a
+day-*t* session affects the *following* night's HRV). The accompanying §5 prose ("day-*t*
+load lands on that **same** night's deviation") and the first estimator implementation
+instead used **same-night** alignment. On real data the same-night version is wrong: Garmin's
+overnight HRV is morning-timestamped, so a session first affects the next night's reading.
+Empirically, the deviation the night *after* a session is suppressed while the *same*-night
+deviation is not — the latter reflects the pre-training morning state that drives the decision
+to train (a "train-when-recovered" behavioural confound), which produced spurious *negative*
+cost slopes. The estimators now expose `load_lag` (default `0` = the synthetic-DGP
+convention; **real panels use `load_lag=1`**), aligning each session's load to the night it
+first affects and the recovery regime one night further. This brings the implementation in
+line with the registered `Δlndev[t+1]` formula; where the §5 prose and the §5 formula
+conflict, **the formula is authoritative**.
+
+**A2 — Strength training added as a third modeled load type (2026-06-19, commit `2f80f08`).**
+§4 declared sport ∈ {triathlon, soccer, rest}. The real panel contains a substantial number
+of strength-training sessions (~20% of otherwise-rest days). Folding them into the `rest`
+baseline contaminates the recovery-cost contrast (strength carries real autonomic load).
+Amendment: `strength` is modeled as its **own** load category — its own cost slope and
+recovery τ — keeping the `rest` baseline clean; the H-A1/H-A2 **headline contrasts remain
+triathlon-vs-soccer**. `multi_sport` (triathlon races / bricks) maps to `triathlon`.
+
+**A3 — Prior exploratory fitting of the A-layer on real data (2026-06-19).**
+§1 and §11 state that at registration the real exposure→outcome relationships had not been
+modeled, and that the document would be frozen/submitted before the sport×load→HRV
+relationship was estimated. **This was not adhered to for the A-layer.** During pipeline
+development (data ingest, schema reconciliation, and the A1 alignment discovery), the H-A1
+cost and H-A2 τ models were fit on the **full** real panel — including the most-recent-20%
+segment §7 reserved as held-out — and the results were inspected. The A-layer is therefore an
+**exploratory, fully-disclosed** analysis, not a blinded confirmatory one. (The A-layer is
+structural-posterior estimation and does not rely on an out-of-sample holdout for validity,
+but the "not yet fit" / "holdout untouched" claims are no longer true for it.) **Unaffected:**
+the prediction layer (H-P1) and its 20% holdout have **not** been fit or inspected; that
+layer's pre-registration discipline remains intact and will be honored.
+
+**A4 — TRIMP heart-rate bounds derived from the subject's own data (2026-06-19).**
+Banister TRIMP requires resting and maximum HR. To avoid hand-tuned inputs these are set from
+the archived data: `hr_rest` = the median of the Garmin daily resting-HR series; `hr_max` =
+the maximum observed activity HR (corroborated by several near-maximal soccer sessions rather
+than a single spike). The specific values live in the local analysis config and are not
+committed (personal-data policy); the derivation rule above makes them reproducible.
