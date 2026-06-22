@@ -196,6 +196,26 @@ the maximum observed activity HR (corroborated by several near-maximal soccer se
 than a single spike). The specific values live in the local analysis config and are not
 committed (personal-data policy); the derivation rule above makes them reproducible.
 
+**A6 — Prediction layer (H-P1): candidate simplified to an OLS linear model (2026-06-22).**
+§5 listed the candidate predictor as "state-space/Kalman + gradient-boosting (lagged
+features)". With an effective sample size of only ≈130 independent days (reported next to the
+result), a high-variance learner would overfit; the hypothesis is specifically whether
+*cross-sport load* adds next-day skill, so the candidate is an OLS linear model = the AR(1)
+baseline **plus** today's per-sport TRIMP loads. Baselines (random-walk, AR(1)), the
+leakage-safe CPCV evaluation, the embargo (sized from the AR(1)-residual ACF), the 20%
+holdout, and the §6 "5th-percentile > 0" decision rule are all as registered. Kalman/GBM
+variants are left as optional robustness runs and were not needed: the linear candidate
+already returns a null increment (below), so a more flexible model is unlikely to overturn a
+null in the direction of *more* skill. Implemented in `garmin_nof1.models.prediction`;
+reported by `scripts/prediction_report.py`.
+
+*Result (H-P1, as expected, null):* on the development set AR(1) clearly beats random-walk
+(RMSE 0.140 vs 0.168), but adding cross-sport load barely moves it (0.139) and the CPCV skill
+improvement has a 5th percentile below 0 — H-P1 **does not beat baseline**, matching the
+pre-registered prior. The single holdout evaluation is consistent (a marginal, non-decisive
++0.006 RMSE improvement). Next-day HRV here is dominated by its own autoregression; today's
+training load adds no robust incremental prediction.
+
 **A5 — H-D1 rescoped: reconstruction validation + quality audit, not a wrist-vs-chest device
 comparison (2026-06-22).**
 §3/§5 framed H-D1 as agreement between **wrist** Garmin HR/HRV and a **chest-strap** reference.
