@@ -11,6 +11,7 @@ from garmin_nof1.pipeline.parse_rr import (
     metrics_from_rr,
     reconstruct_rr_ms,
     rmssd,
+    rr_quality,
     sdnn,
 )
 
@@ -131,3 +132,29 @@ def test_adapter_sets_metrics_none_when_filter_exhausts_beats():
     fit = _FakeFitFile([_FakeMsg("hrv", {"time": [0.800, 2.000]})])
     rec = activity_record_from_fitfile(fit, correct_artifacts=True)
     assert rec.rr_ms.size == 2 and rec.metrics is None
+
+
+def test_rr_quality_counts_artifacts_and_rmssd_shift():
+    # one big jump that the artifact filter should drop
+    rr = np.array([800.0, 810.0, 805.0, 2000.0, 808.0, 802.0])  # 2000 ms is an artifact
+    q = rr_quality(rr, session_seconds=None)
+    assert q.n_beats_raw == 6
+    assert q.n_artifacts == 1
+    assert abs(q.artifact_rate - 1 / 6) < 1e-9
+    # raw RMSSD is inflated by the 2000 ms spike; corrected is much smaller
+    assert q.rmssd_raw > q.rmssd_corrected
+    assert np.isnan(q.coverage)
+
+
+def test_rr_quality_coverage_uses_corrected_duration():
+    # 100 clean beats of ~800 ms -> ~80 s of beats; over a 100 s session -> coverage ~0.8
+    rr = np.full(100, 800.0)
+    q = rr_quality(rr, session_seconds=100.0)
+    assert q.n_artifacts == 0
+    assert abs(q.coverage - 0.8) < 1e-9
+    assert abs(q.mean_hr - 75.0) < 1e-9  # 60000/800
+
+
+def test_rr_quality_rejects_too_few_beats():
+    with pytest.raises(ValueError, match=">= 2 raw"):
+        rr_quality(np.array([800.0]))

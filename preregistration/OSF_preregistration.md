@@ -195,3 +195,21 @@ the archived data: `hr_rest` = the median of the Garmin daily resting-HR series;
 the maximum observed activity HR (corroborated by several near-maximal soccer sessions rather
 than a single spike). The specific values live in the local analysis config and are not
 committed (personal-data policy); the derivation rule above makes them reproducible.
+
+**A5 — H-D1 rescoped: reconstruction validation + quality audit, not a wrist-vs-chest device
+comparison (2026-06-22).**
+§3/§5 framed H-D1 as agreement between **wrist** Garmin HR/HRV and a **chest-strap** reference.
+On inspecting the archived activity FITs (the chest-strap window, 22 sessions carrying
+beat-to-beat RR), the watch logs the paired strap as the **sole** HR source: `record.heart_rate`
+equals the RR-derived HR and the session `avg_heart_rate`, and no independent wrist-optical
+series is stored. A simultaneous wrist-vs-chest device comparison is therefore **not supported**
+by the data and is **not claimed** (demoted per the §8 "missing data → demote the module"
+rule). H-D1 is rescoped to what the strap RR does support, and reported as such:
+(i) **reconstruction validation** — our RR→mean-HR reconstruction vs Garmin's independent
+firmware `avg_heart_rate` over the 22 sessions (Bland-Altman bias + 95% LoA, ICC(2,1), MAPE,
+CCC); (ii) **RR data-quality audit** — artifact rate, the RMSSD inflation that artifact
+correction removes, and beat coverage, split by sport. "Adequate reconstruction" reuses the
+pre-registered §6 thresholds (ICC ≥ 0.75 and MAPE ≤ 10%). Implemented in
+`garmin_nof1.eval.agreement` and `garmin_nof1.pipeline.parse_rr.rr_quality`; reported by
+`scripts/dlayer_report.py`. This is a measurement-pipeline and data-quality finding scoped to
+N=1, not a device-validation claim about the Forerunner's wrist optical sensor.

@@ -149,6 +149,71 @@ def metrics_from_rr(rr_ms, *, correct_artifacts: bool = True) -> HrvMetrics:
 
 
 @dataclass(frozen=True)
+class RrQuality:
+    """Per-session RR data-quality summary (D-layer measurement audit).
+
+    Fields
+    ------
+    n_beats_raw : int
+        RR intervals before artifact filtering.
+    n_artifacts : int
+        Intervals dropped by :func:`filter_artifacts`.
+    artifact_rate : float
+        ``n_artifacts / n_beats_raw`` (0.0 when there are no beats).
+    rmssd_raw, rmssd_corrected : float
+        RMSSD (ms) before and after artifact correction.
+    sdnn_corrected : float
+        SDNN (ms) after artifact correction.
+    mean_hr : float
+        Mean heart rate (bpm) from the artifact-corrected RR.
+    coverage : float
+        Fraction of the session covered by accepted beats — the corrected RR total
+        duration divided by ``session_seconds`` (NaN if ``session_seconds`` is None/0).
+    """
+
+    n_beats_raw: int
+    n_artifacts: int
+    artifact_rate: float
+    rmssd_raw: float
+    rmssd_corrected: float
+    sdnn_corrected: float
+    mean_hr: float
+    coverage: float
+
+
+def rr_quality(rr_ms, *, session_seconds: float | None = None, threshold: float = 0.2) -> RrQuality:
+    """Summarize one session's RR quality: artifact rate and the RMSSD shift it causes.
+
+    Quantifies how much the artifact filter changes the headline metric (``rmssd_raw`` vs
+    ``rmssd_corrected``) and how completely the beats cover the session — the measurement
+    audit the D layer reports per session. Requires >= 2 raw beats (and >= 2 after
+    correction); raises :class:`ValueError` otherwise.
+    """
+    rr = np.asarray(rr_ms, dtype=float)
+    n_raw = int(rr.size)
+    if n_raw < 2:
+        raise ValueError("rr_quality needs >= 2 raw RR intervals")
+    corrected = filter_artifacts(rr, threshold)
+    if corrected.size < 2:
+        raise ValueError("rr_quality: < 2 beats remain after artifact filtering")
+    n_art = n_raw - int(corrected.size)
+    if session_seconds:
+        coverage = float(np.sum(corrected) / 1000.0 / session_seconds)
+    else:
+        coverage = float("nan")
+    return RrQuality(
+        n_beats_raw=n_raw,
+        n_artifacts=n_art,
+        artifact_rate=float(n_art / n_raw),
+        rmssd_raw=rmssd(rr),
+        rmssd_corrected=rmssd(corrected),
+        sdnn_corrected=sdnn(corrected),
+        mean_hr=mean_hr(corrected),
+        coverage=coverage,
+    )
+
+
+@dataclass(frozen=True)
 class ActivityRecord:
     """Parsed activity: session metadata + reconstructed RR and HRV metrics.
 
