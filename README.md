@@ -45,6 +45,8 @@ land on a **null** — and that is reported as the finding, not hidden.
   so the FITs carry **no independent wrist-optical series** — a simultaneous wrist-vs-chest
   *device* comparison is not supported and is **not claimed** (demoted; see prereg A5).
 
+![D-layer RR quality: raw vs artifact-corrected RMSSD by sport](docs/figures/d_layer_quality.png)
+
 ### A — Differential recovery (904-day panel; triathlon 114 / soccer 48 / strength 90)
 - **H-A1 (cost): null.** Next-night ln-RMSSD cost per 100 TRIMP is ~0.04 for all three sports —
   triathlon and soccer essentially identical — so the soccer−triathlon interaction is ≈0
@@ -58,12 +60,16 @@ land on a **null** — and that is reported as the finding, not hidden.
   keeps the headline contrast clean and shows strength carries the longest recovery cost — a
   signal that would vanish if it were lumped into the baseline.
 
+![A-layer: H-A1 recovery cost (null) and H-A2 recovery τ by sport, with 95% intervals](docs/figures/a_layer.png)
+
 ### P — Prediction (demoted falsification)
 - Predicting next-day ln-RMSSD: random-walk RMSE 0.168, **AR(1) 0.140** (persistence is
   real), candidate AR(1)+load **0.139**. CPCV skill-improvement 5th percentile < 0 →
   **H-P1 does not beat baseline** (null, matching the prior). Effective sample size ≈ **324**
   independent days out of 723 (computed on the detrended residual) — the ceiling on power,
   reported alongside the result.
+
+![H-P1 prediction: RMSE by model and the CPCV skill-improvement distribution](docs/figures/prediction.png)
 
 ## A methodological highlight: HRV timestamp alignment
 
@@ -75,6 +81,8 @@ decision to train* ("train-when-recovered" reverse causation). Aligning load to 
 affects (`load_lag=1`) flips the costs to the physiological sign and matches the pre-registered
 `Δlndev[t+1] ~ TRIMP[t]` formula. This is the kind of confound that only shows up on real data,
 and it is logged transparently in the pre-registration (amendment A1).
+
+![Same-night vs next-night HRV deviation by sport — the timestamp-alignment confound](docs/figures/alignment.png)
 
 ## Honest constraints (these shape everything)
 
@@ -133,6 +141,8 @@ scripts/
   check_panel.py         # build + sanity-check the panel (privacy-safe summary)
   dlayer_report.py       # D-layer reconstruction validation + RR quality audit
   prediction_report.py   # H-P1 holdout-safe skill report
+  make_figures.py        # regenerate the README figures (privacy-safe aggregates)
+docs/figures/            # committed README figures (aggregate effect estimates only)
 tests/                   # pytest, 133 tests — incl. leakage-injection + estimator recovery
 data/                    # gitignored: raw FIT/JSON archive + derived panel (never committed)
 preregistration/         # OSF pre-registration + append-only amendment log
@@ -168,6 +178,9 @@ python scripts/check_panel.py
 # 3. Run the layers
 python scripts/dlayer_report.py        # D: HRV reconstruction validation + RR quality
 python scripts/prediction_report.py    # P: H-P1 skill vs baseline (holdout-safe)
+
+# 4. Regenerate the README figures
+python scripts/make_figures.py         # -> docs/figures/*.png
 ```
 
 The A-layer models (`fit_recovery_cost`, `fit_recovery_tau`) take the built panel directly;
