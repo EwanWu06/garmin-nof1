@@ -206,11 +206,11 @@ def build_daily_panel(
     The Garmin-response key assumptions live entirely in ``garmin_schema``; reconcile them
     against your real archives on the first run.
 
-    Assumption:
-        One archive per calendar date per prefix (the ``<prefix>-<ISO-date>.json`` ingest
-        naming guarantees this within a directory). When several directories are given and a
-        date appears in more than one, the **later-listed** directory wins for that date; a
-        missing directory simply contributes nothing.
+    Daily summaries (hrv/sleep/rhr) are assigned per date, so a date appearing in more than one
+    archive (or directory) is simply overwritten, not accumulated; the later-listed directory
+    wins. Activities, however, come as **overlapping date-range** exports, so the same workout
+    can appear in several files — they are de-duplicated by ``activityId`` (first sighting) before
+    the TRIMP fold, otherwise its load would be summed once per archive.
 
     Raises:
         ValueError: if no records are found across the given directories (propagated from
@@ -238,9 +238,19 @@ def build_daily_panel(
                 date, fields = got
                 per_day.setdefault(date, {}).update(fields)
 
+    # De-duplicate by activityId before folding: the archives are date-range exports that
+    # overlap (e.g. activities-2024-06-01_2026-06-15 and activities-2026-01-01_2026-06-22),
+    # so the same physical workout appears in several files and would otherwise have its TRIMP
+    # summed once per archive. Keep first sighting (mirrors ingest_garmin.activity_ids_in_range).
     sessions = []
+    seen_ids: set = set()
     for resp in _load("activities"):
         for act in resp:
+            aid = act.get("activityId")
+            if aid is not None:
+                if aid in seen_ids:
+                    continue
+                seen_ids.add(aid)
             session = activity_to_session(act)
             if session:
                 sessions.append(session)

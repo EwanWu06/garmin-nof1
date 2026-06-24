@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 from garmin_nof1.eval.cv import combinatorial_purged_splits, effective_sample_size
-from garmin_nof1.models._common import modeled_sports
+from garmin_nof1.models._common import deviation, modeled_sports
 
 _MODELS = ("random_walk", "ar1", "candidate")
 
@@ -122,7 +122,8 @@ class PredictionResult:
         Number of CPCV train/test combinations scored (= the size of the skill-improvement
         distribution, ``C(n_groups, n_test_groups)``).
     ess : float
-        Effective sample size of the target series (independent-information ceiling on power).
+        Effective sample size of the **detrended** outcome deviation (independent-information
+        ceiling on power) — computed on the residual, not the trend-laden raw series.
     n_obs : int
         Supervised consecutive-day pairs available.
     """
@@ -176,6 +177,8 @@ def evaluate_prediction(
     n_groups: int = 6,
     n_test_groups: int = 2,
     embargo: int = 2,
+    purge: int = 1,
+    detrend_window: int = 28,
 ) -> PredictionResult:
     """Evaluate H-P1 with Combinatorial Purged CV on the supervised consecutive-day pairs.
 
@@ -183,6 +186,13 @@ def evaluate_prediction(
     then summarizes the candidate-vs-AR(1) skill-improvement distribution and the
     pre-registered ``5th-percentile > 0`` decision. Pass only the **development** panel here;
     keep the holdout (see :func:`holdout_split`) for a single final evaluation.
+
+    ``purge`` defaults to 1: the label is one-step-ahead, so without purging, the train row
+    immediately before a test block carries ``y_next`` = the test block's first-day value,
+    which is also that block's first feature — a (benign but real) shared-value adjacency.
+    ``ess`` is reported on the **detrended** deviation (``detrend_window``), not the raw
+    trend-laden series, because a slow baseline dominates the raw autocorrelation and deflates
+    the independent-information estimate (the project's CV demo makes the same point).
     """
     sup = build_supervised(df, outcome=outcome)
     load_cols = [c for c in sup.columns if c.startswith("load_")]
@@ -190,7 +200,7 @@ def evaluate_prediction(
         raise ValueError("too few supervised pairs for the requested CPCV grouping")
 
     splits = combinatorial_purged_splits(
-        len(sup), n_groups=n_groups, n_test_groups=n_test_groups, embargo=embargo
+        len(sup), n_groups=n_groups, n_test_groups=n_test_groups, embargo=embargo, purge=purge
     )
     per_model: dict[str, list[float]] = {m: [] for m in _MODELS}
     improvements: list[float] = []
@@ -208,6 +218,6 @@ def evaluate_prediction(
         skill_improvement_p05=p05,
         beats_baseline=bool(p05 > 0.0),
         n_splits=len(splits),
-        ess=effective_sample_size(df[outcome].to_numpy()),
+        ess=effective_sample_size(deviation(df, outcome, None, detrend_window).to_numpy()),
         n_obs=len(sup),
     )

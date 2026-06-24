@@ -11,17 +11,21 @@ stop.** Rigor, honest boundaries, a pre-registered analysis with an append-only 
 and a validated, reproducible toolchain are the deliverables. Two of the three headline tests
 land on a **null** — and that is reported as the finding, not hidden.
 
-> **TL;DR of the science.** On this person: (D) HRV reconstructed from chest-strap RR agrees
-> with Garmin's own firmware to **ICC 0.99**; (A) soccer does **not** cost more next-day vagal
-> HRV *per unit of training load* than triathlon (**null**), but its recovery time-constant is
-> ~2× longer (strong, not decisive at the 95% bar); (P) cross-sport load adds **no** robust
-> next-day HRV prediction over an AR(1) baseline (**null**, as pre-registered).
+> **TL;DR of the science.** On this person: (D) the RR→HRV reconstruction is verified
+> self-consistent with the firmware and the strap signal's quality is audited (motion artifact
+> inflates raw RMSSD ~3× in field sport); (A) soccer does **not** cost more next-day vagal HRV
+> *per unit of training load* than triathlon (**null**), but its recovery time-constant is ~2×
+> longer (strong, not decisive at the 95% bar); (P) cross-sport load adds **no** robust next-day
+> HRV prediction over an AR(1) baseline (**null**, as pre-registered).
+>
+> The published numbers survived an adversarial multi-agent correctness audit (one real bug —
+> TRIMP double-counting from overlapping archives — found and fixed; details in prereg A7–A10).
 
 ## The three layers
 
 | Layer | Question | Pre-registered prior | Real-data outcome |
 |---|---|---|---|
-| **D — Measurement** | Does HRV reconstructed from raw beat-to-beat RR agree with a reference, and how clean is the signal? | Should validate | **Validated** — ICC 0.99 vs Garmin firmware HR; quantified artifact inflation of RMSSD |
+| **D — Measurement** | Is the RR→HRV reconstruction correct, and how clean is the strap signal? | Should validate | **Verified + audited** — RR parse self-consistent with the firmware; quantified artifact inflation of RMSSD |
 | **A — Headline (H-A1)** | Does **soccer cost more next-day vagal HRV per unit load** than triathlon? | Expected positive | **Null** — per-TRIMP cost is the same across sports |
 | **A — Headline (H-A2)** | Is the **recovery time-constant τ** sport-specific? | Expected positive | **Soccer ~2× slower** to recover than triathlon; strong (P≈0.97) but just shy of the 95% bar |
 | **Prediction (demoted, H-P1)** | Does cross-sport load add next-day-HRV skill **over AR(1) / random-walk**? | Expected null | **Null** — AR(1) beats random-walk, load adds nothing robust |
@@ -29,10 +33,12 @@ land on a **null** — and that is reported as the finding, not hidden.
 ## Results
 
 ### D — Measurement validation (chest-strap window, 22 RR-bearing sessions)
-- **Reconstruction is correct.** Our RR→mean-HR pipeline vs Garmin's independent firmware
-  `avg_heart_rate` over the same heartbeats: **bias −1.2 bpm, ICC(2,1) 0.990, CCC 0.990,
-  MAPE 0.93%** — passes the pre-registered adequacy bar (ICC ≥ 0.75, MAPE ≤ 10%).
-- **Quality audit.** Artifact correction removes **~19 ms** of motion-inflated RMSSD; soccer
+- **RR parsing is self-consistent.** Our `60000/mean(RR)` vs Garmin's firmware `avg_heart_rate`
+  agree to ~1 bpm (bias −1.2, ICC 0.99, MAPE 0.93%) — but both come from the *same* chest-strap
+  beat stream, so this is a parse/concatenation **self-consistency check** (it catches gross
+  parser bugs), **not** independent device agreement. We don't claim it as a sensor validation.
+- **Quality audit (the substantive D-layer result).** Artifact correction removes **~19 ms** of
+  motion-inflated RMSSD (raw ~3× the corrected value); soccer
   (2.7% artifact beats) is noisier than running (1.9%) — field sport HRV needs aggressive
   cleaning, which is *why* the study uses Garmin's clean overnight HRV for the daily panel.
 - **Honest scope.** When a chest strap is paired the watch logs it as the *sole* HR source,
@@ -40,11 +46,11 @@ land on a **null** — and that is reported as the finding, not hidden.
   *device* comparison is not supported and is **not claimed** (demoted; see prereg A5).
 
 ### A — Differential recovery (904-day panel; triathlon 114 / soccer 48 / strength 90)
-- **H-A1 (cost): null.** Next-night ln-RMSSD cost per 100 TRIMP is ~0.03 for all three
-  sports; the soccer−triathlon interaction is ≈0 (P 0.57). Per unit of *HR-based* load, the
-  sports tax vagal recovery equally. (Caveat: TRIMP underestimates soccer's intermittent
-  sprint load, so "equal per TRIMP" ≠ "equal per session.")
-- **H-A2 (recovery speed): suggestive.** Recovery time-constant τ: **triathlon 0.39 d,
+- **H-A1 (cost): null.** Next-night ln-RMSSD cost per 100 TRIMP is ~0.04 for all three sports —
+  triathlon and soccer essentially identical — so the soccer−triathlon interaction is ≈0
+  (P 0.50). Per unit of *HR-based* load, the sports tax vagal recovery equally. (Caveat: TRIMP
+  underestimates soccer's intermittent sprint load, so "equal per TRIMP" ≠ "equal per session.")
+- **H-A2 (recovery speed): suggestive.** Recovery time-constant τ: **triathlon 0.40 d,
   soccer 0.77 d, strength 0.88 d**. Soccer recovers ~2× slower than triathlon
   (P(soccer slower) ≈ 0.97), but the 95% credible interval grazes 0 — **not decisive** at the
   pre-registered threshold; soccer's 48 sessions are the power bottleneck.
@@ -55,8 +61,9 @@ land on a **null** — and that is reported as the finding, not hidden.
 ### P — Prediction (demoted falsification)
 - Predicting next-day ln-RMSSD: random-walk RMSE 0.168, **AR(1) 0.140** (persistence is
   real), candidate AR(1)+load **0.139**. CPCV skill-improvement 5th percentile < 0 →
-  **H-P1 does not beat baseline** (null, matching the prior). Effective sample size ≈ **130**
-  independent days out of 723 — the true ceiling on power, reported alongside the result.
+  **H-P1 does not beat baseline** (null, matching the prior). Effective sample size ≈ **324**
+  independent days out of 723 (computed on the detrended residual) — the ceiling on power,
+  reported alongside the result.
 
 ## A methodological highlight: HRV timestamp alignment
 
@@ -93,6 +100,11 @@ commit that made it:
   **A3** full disclosure that the A-layer was fit exploratorily on the whole panel ·
   **A4** TRIMP HR bounds derived from data · **A5** H-D1 rescoped (no wrist-vs-chest) ·
   **A6** prediction candidate simplified to OLS (ESS too small for Kalman/GBM).
+- **A7–A10** (from an adversarial multi-agent correctness audit): **A7** TRIMP double-counting
+  fixed (de-dup overlapping archives by `activityId`) · **A8** ESS computed on the detrended
+  residual, not the raw trend · **A9** D-layer HR check relabeled as RR-parse self-consistency,
+  not independent agreement · **A10** minor correctness/labeling fixes (CPCV `purge=1`,
+  lag-aligned session counts, validator bound, ESS docstring, mixed-sport-day limitation).
 
 The prediction layer kept its discipline: developed on the first 80%, the 20% holdout
 evaluated exactly **once**.
@@ -121,7 +133,7 @@ scripts/
   check_panel.py         # build + sanity-check the panel (privacy-safe summary)
   dlayer_report.py       # D-layer reconstruction validation + RR quality audit
   prediction_report.py   # H-P1 holdout-safe skill report
-tests/                   # pytest, 132 tests — incl. leakage-injection + estimator recovery
+tests/                   # pytest, 133 tests — incl. leakage-injection + estimator recovery
 data/                    # gitignored: raw FIT/JSON archive + derived panel (never committed)
 preregistration/         # OSF pre-registration + append-only amendment log
 ```
@@ -132,7 +144,7 @@ preregistration/         # OSF pre-registration + append-only amendment log
 mamba env create -f environment.yml     # or: conda env create -f environment.yml
 conda activate garmin-nof1
 pip install -e .
-pytest                                  # 132 tests, all on synthetic data — no private data needed
+pytest                                  # 133 tests, all on synthetic data — no private data needed
 ```
 
 Everything that gates a conclusion (the leakage-safe CV, the estimators, the agreement stats)
@@ -165,6 +177,6 @@ prereg A4.
 ## Status
 
 **Complete.** All three layers are built, validated on synthetic ground truth, and run on the
-real combined panel; 132 tests pass. The scientific story is two honest nulls (H-A1, H-P1), one
+real combined panel; 133 tests pass. The scientific story is two honest nulls (H-A1, H-P1), one
 strong-but-not-decisive effect (H-A2: soccer recovers slower), and a clean measurement
 validation (D) — with every analytical decision logged in the pre-registration.

@@ -4,17 +4,19 @@
 Runs on the archived activity FITs that carry beat-to-beat RR (chest strap). For each such
 session it:
   1. reconstructs mean HR / RMSSD / SDNN from the raw RR with the D-layer parser, and
-  2. compares our RR-derived **mean HR** against Garmin's own firmware ``avg_heart_rate``
-     for the same session — an independent computation from the same heartbeats, so it
-     validates that our RR reconstruction reproduces the official value
-     (Bland-Altman bias + 95% LoA, ICC(2,1), MAPE, CCC), and
+  2. runs an RR-parsing **self-consistency check**: our RR-derived mean HR (= beats / duration)
+     vs Garmin's firmware ``avg_heart_rate``. NOTE this is *not* independent device agreement —
+     both come from the **same single chest-strap beat stream**, so ``60000/mean(rr)`` and the
+     firmware average are near-arithmetic identities; agreement to ~1 bpm only confirms the RR
+     parse/concatenation reproduces the firmware's beats/duration (it catches gross parser bugs,
+     it does not validate a sensor), and
   3. audits RR data quality (artifact rate, the RMSSD shift artifact-correction causes,
-     and beat coverage of the session), split by sport.
+     and beat coverage of the session), split by sport — the non-circular part of the report.
 
 Honest scope (see preregistration §13/A5): when a chest strap is paired the watch logs the
 strap as the *sole* HR source, so these files do **not** contain an independent wrist-optical
 series — a simultaneous wrist-vs-chest device comparison is not supported and is not claimed
-here. This report validates the RR→HRV reconstruction pipeline and the strap data quality.
+here.
 
 Output is privacy-safe (aggregate statistics only; no raw HR/RR values). Usage:
     python scripts/dlayer_report.py
@@ -80,13 +82,14 @@ def main() -> None:
 
     print(f"\n带逐拍 RR 的 session:{len(rows)} 个  (按运动:{by_sport})")
 
-    print("\n[1] mean HR 一致性:我们的 RR 重构 vs Garmin 固件 avg_heart_rate")
+    print("\n[1] RR 解析自洽性检查(非独立比对):我们的 60000/mean(RR) vs Garmin 固件 avg HR")
+    print("    注意:两者出自同一条胸带拍流,近似恒等式;吻合只证明 RR 解析正确,非传感器验证。")
     if len(our_hr) >= 2:
         a = agreement(np.array(garmin_hr), np.array(our_hr))  # reference=Garmin, test=ours
         print(f"  n={a.n}  bias(ours-Garmin)={a.bias:+.2f} bpm  95% LoA=({a.loa_lower:+.2f},"
               f" {a.loa_upper:+.2f})")
         print(f"  MAPE={a.mape:.2f}%   ICC(2,1)={a.icc:.4f}   CCC={a.ccc:.4f}")
-        print("  (bias≈0 且 ICC/CCC≈1 = RR 重构忠实复现了官方 HR -> 测量管道正确)")
+        print("  (≈恒等,只表示 RR 解析/拼接复现了固件的 beats/duration —— 能抓住粗解析 bug)")
     else:
         print("  (可用于比对的 session 不足 2 个)")
 

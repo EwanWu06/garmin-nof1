@@ -111,9 +111,12 @@ class PurgedWalkForwardSplit:
 
 def n_backtest_paths(n_groups: int, n_test_groups: int) -> int:
     """Number of distinct backtest paths produced by CPCV (de Prado 2018):
-    ``phi = C(N-1, k-1)`` where N = n_groups, k = n_test_groups."""
-    if not 1 <= n_test_groups <= n_groups:
-        raise ValueError("require 1 <= n_test_groups <= n_groups")
+    ``phi = C(N-1, k-1)`` where N = n_groups, k = n_test_groups.
+
+    Bounds match :func:`combinatorial_purged_splits` (strict ``k < N``): with ``k == N`` the
+    test set is every group and there is no training data, so it is rejected, not counted."""
+    if not 1 <= n_test_groups < n_groups:
+        raise ValueError("require 1 <= n_test_groups < n_groups")
     return math.comb(n_groups - 1, n_test_groups - 1)
 
 
@@ -175,9 +178,12 @@ def effective_sample_size(x) -> float:
     """Effective sample size of a serially correlated series.
 
     ``ESS = m / (1 + 2 * sum_k rho_k)`` with the sum truncated at the first
-    non-positive autocorrelation (Geyer's initial positive sequence). For an AR(1)
-    series with autocorrelation ``rho`` this approaches ``m*(1-rho)/(1+rho)``; for
-    i.i.d. data it approaches ``m``.
+    **individually** non-positive autocorrelation (initial-positive-lag truncation). This is
+    the simpler cousin of Geyer's initial-positive-*sequence*, which truncates on the first
+    non-positive *pairwise* sum ``rho_2m + rho_2m+1``; the two coincide for a monotone-positive
+    ACF (the case here) but the per-lag rule can stop earlier and slightly over-estimate ESS on
+    an oscillating ACF. For an AR(1) series with autocorrelation ``rho`` this approaches
+    ``m*(1-rho)/(1+rho)``; for i.i.d. data it approaches ``m``.
 
     NaNs (non-wear nights) are dropped before estimation — a simplification that
     treats the remaining points as contiguous, adequate for reporting the order of

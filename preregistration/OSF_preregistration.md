@@ -233,3 +233,48 @@ pre-registered §6 thresholds (ICC ≥ 0.75 and MAPE ≤ 10%). Implemented in
 `garmin_nof1.eval.agreement` and `garmin_nof1.pipeline.parse_rr.rr_quality`; reported by
 `scripts/dlayer_report.py`. This is a measurement-pipeline and data-quality finding scoped to
 N=1, not a device-validation claim about the Forerunner's wrist optical sensor.
+
+---
+
+*Amendments A7–A10 were prompted by an adversarial multi-agent correctness audit of the
+published analysis (2026-06-22). The audit confirmed 9 issues — one real bug and several
+framing/labeling defects; the bottom line was that no scientific conclusion flips, but two
+reported numbers needed correction. The audit report is kept locally.*
+
+**A7 — TRIMP double-counting fixed (de-dup by activityId) (2026-06-22).**
+`build_daily_panel` concatenated several *overlapping date-range* activity exports and summed
+TRIMP keyed only by date, so a workout appearing in more than one archive had its load counted
+2–3×. On the real panel this inflated TRIMP ~1.5× on ~90 days that all fell inside the
+prediction holdout. Fix: de-duplicate by `activityId` (first sighting) before the fold. Effect:
+the H-A1 per-TRIMP cost slopes — which the contaminated panel had deflated to ~0.03 — return to
+**~0.039 for both triathlon and soccer (interaction ≈ 0, P ≈ 0.50)**, an even cleaner H-A1
+null; the H-P1 verdict stays null. The primary exposure (TRIMP) is the pre-registered headline
+variable, so this correctness fix matters even though no conclusion changes.
+
+**A8 — ESS reported on the detrended residual, not the raw series (2026-06-22).**
+`evaluate_prediction` computed effective sample size on the raw, trend-laden ln_rmssd; a slow
+baseline dominates its autocorrelation and deflates ESS — the exact error the project's own CV
+demo warns against. Fixed to compute ESS on the 28-day-detrended deviation. Reported real-data
+ESS changes from ≈130 to **≈324** (of 723 dev days). Decision-irrelevant (the H-P1 verdict uses
+the CPCV skill distribution, not ESS) but a corrected headline figure.
+
+**A9 — D-layer HR check relabeled as RR-parsing self-consistency, not independent agreement
+(2026-06-22).** The D-layer compared our `60000/mean(RR)` to Garmin's firmware `avg_heart_rate`.
+Both derive from the **same single chest-strap beat stream**, so the comparison is a near-
+arithmetic identity, not independent method/device agreement; the ICC 0.99 is largely
+tautological. Reframed: it is an RR-parse/concatenation self-consistency check (it catches gross
+parser bugs), the word "independent" is dropped, and ICC 0.99 is no longer presented as passing
+the device-agreement adequacy bar. The non-circular D-layer content stands: the RR data-quality
+audit (artifact rate, the ~19 ms RMSSD inflation artifact-correction removes, coverage), and the
+core constraint that no independent wrist series exists (A5).
+
+**A10 — minor correctness/labeling fixes from the audit (2026-06-22).**
+(i) CPCV now passes `purge=1` for the one-step-ahead label, removing a benign train-label/
+test-feature shared-value adjacency that contradicted the "leakage-safe" wording (changes no
+number). (ii) `recovery_cost`'s reported per-sport session counts `n` now count the *lag-aligned*
+contributing session (nonzero load column), matching the docstring under `load_lag=1`. (iii)
+`n_backtest_paths` bound tightened to `k < n_groups` to match `combinatorial_purged_splits`.
+(iv) `effective_sample_size` docstring corrected (initial-positive-*lag* truncation, not Geyer's
+initial-positive-*sequence*). (v) Documented the known mixed-sport-day limitation: the panel
+stores one label + whole-day TRIMP, so on ~3% of active days a co-occurring sport's load is
+attributed to the dominant sport. None of these change a scientific conclusion.

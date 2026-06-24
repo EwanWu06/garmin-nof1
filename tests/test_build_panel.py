@@ -307,6 +307,23 @@ def test_build_daily_panel_fills_gap_day_as_rest(tmp_path):
     assert df.iloc[1]["sport"] == "rest" and not df.iloc[1]["hrv_observed"]
 
 
+def test_build_daily_panel_dedups_activities_by_id(tmp_path):
+    # data/raw holds several overlapping date-range exports; the same workout's TRIMP must be
+    # counted ONCE, not once per archive it appears in.
+    act = {
+        "activityId": 999,
+        "startTimeLocal": "2024-05-01 18:00:00",
+        "activityType": {"typeKey": "soccer"},
+        "averageHR": 160,
+        "duration": 3600,  # seconds -> 60 min
+    }
+    _write(tmp_path, "activities-2024-05-01_2024-05-31", [act])
+    _write(tmp_path, "activities-2024-05-01_2024-06-30", [act])  # overlapping range, same id
+    df = build_daily_panel(tmp_path, hr_rest=50, hr_max=190, sex="M")
+    once = banister_trimp(60, 160, 50, 190, "M")
+    assert abs(df.iloc[0]["trimp"] - once) < 1e-9  # counted once, not 2x
+
+
 def test_build_daily_panel_combines_multiple_dirs(tmp_path):
     # Two Garmin accounts with non-overlapping dates -> one panel spanning both.
     cn = tmp_path / "cn"

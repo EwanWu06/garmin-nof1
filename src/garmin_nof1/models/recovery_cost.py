@@ -191,6 +191,10 @@ def fit_recovery_cost(
     # Each non-rest sport gets its own load column (data-driven): its nights are explained by
     # its own slope and so leave the "rest" baseline uncontaminated. With only triathlon/soccer
     # present this is exactly the original two-load design.
+    # Known limitation: the panel stores one sport label + the whole day's summed TRIMP, so on a
+    # mixed-session day (e.g. run + strength, ~3% of active days) the full load is attributed to
+    # the dominant sport's column and the co-occurring sport's load reads zero. Per-session load
+    # decomposition would remove this; the effect on the headline contrast is negligible.
     if load_lag < 0:
         raise ValueError("load_lag must be >= 0")
     sports = modeled_sports(sport)
@@ -260,8 +264,10 @@ def fit_recovery_cost(
     phi = float(mu_n[1])
     tau_days = float(-1.0 / np.log(phi)) if 0.0 < phi < 1.0 else float("nan")
 
-    sport_used = fit_df["sport"].astype(object)
-    n = {s: int((sport_used == s).sum()) for s in sports}
+    # Count each sport by the rows whose lag-aligned load actually entered the regression
+    # (nonzero load column), not the deviation row's own-day sport — these differ when
+    # load_lag > 0, and it is the contributing session that the slope is estimated from.
+    n = {s: int((fit_df[load_cols[s]].to_numpy() != 0).sum()) for s in sports}
 
     return RecoveryCostFit(
         cost_slope=cost_slope,
