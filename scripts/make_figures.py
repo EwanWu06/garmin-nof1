@@ -24,7 +24,12 @@ import numpy as np
 from garmin_nof1.eval.cv import combinatorial_purged_splits
 from garmin_nof1.models import fit_recovery_cost, fit_recovery_tau
 from garmin_nof1.models._common import deviation
-from garmin_nof1.models.prediction import _fold_rmse, build_supervised, holdout_split
+from garmin_nof1.models.prediction import (
+    _fold_rmse,
+    build_supervised,
+    embargo_from_residual_acf,
+    holdout_split,
+)
 from garmin_nof1.pipeline.build_panel import build_daily_panel
 from garmin_nof1.pipeline.parse_rr import reconstruct_rr_ms, rr_quality
 
@@ -61,7 +66,7 @@ def fig_a_layer(panel):
     axc.set_ylabel("ln-rMSSD cost per 100 TRIMP\n(positive = HRV suppressed)")
     axc.set_title(
         f"H-A1: recovery cost — NULL\n"
-        f"interaction(soc−tri)≈0, P={cost.prob_interaction_positive:.2f}"
+        f"posterior P(soc−tri>0)={cost.prob_interaction_positive:.2f}"
     )
 
     for i, s in enumerate(sports):
@@ -73,7 +78,7 @@ def fig_a_layer(panel):
     axt.set_ylabel("recovery time-constant τ (days)")
     axt.set_title(
         f"H-A2: soccer recovers ~2× slower\n"
-        f"P(soccer slower)={tau.prob_tau_soccer_longer:.2f} (CI grazes 0)"
+        f"posterior P(soccer slower)={tau.prob_tau_soccer_longer:.2f} (95% CrI grazes 0)"
     )
     _save(fig, "a_layer.png")
 
@@ -152,7 +157,10 @@ def fig_prediction(panel):
     dev_df, _ = holdout_split(panel, frac=0.2)
     sup = build_supervised(dev_df)
     load_cols = [c for c in sup.columns if c.startswith("load_")]
-    splits = combinatorial_purged_splits(len(sup), n_groups=6, n_test_groups=2, embargo=1, purge=1)
+    embargo = embargo_from_residual_acf(dev_df)  # pre-registered embargo, same as the report
+    splits = combinatorial_purged_splits(
+        len(sup), n_groups=6, n_test_groups=2, embargo=embargo, purge=1
+    )
     rmse = {"random_walk": [], "ar1": [], "candidate": []}
     imp = []
     for tr, te in splits:

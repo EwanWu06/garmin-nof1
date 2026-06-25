@@ -12,6 +12,7 @@ import pandas as pd
 from garmin_nof1.models.prediction import (
     PredictionResult,
     build_supervised,
+    embargo_from_residual_acf,
     evaluate_prediction,
     holdout_skill,
     holdout_split,
@@ -85,6 +86,13 @@ def test_ar1_beats_random_walk_on_mean_reverting_series():
     res = evaluate_prediction(df, n_groups=6, n_test_groups=2, embargo=2)
     # mean-reverting (phi=0.3) -> fitted AR(1) predicts better than persistence
     assert res.rmse["ar1"] < res.rmse["random_walk"]
+
+
+def test_embargo_from_residual_acf_is_small_for_fast_decorrelation():
+    # weak AR(1) (phi=0.3) -> the residual decorrelates within a day or two -> small embargo
+    df = _panel(600, planted_next_day_effect=False, seed=12)
+    e = embargo_from_residual_acf(df)
+    assert isinstance(e, int) and 1 <= e <= 4
 
 
 def test_holdout_split_is_the_temporal_tail():

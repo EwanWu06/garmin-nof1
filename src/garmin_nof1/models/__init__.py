@@ -7,6 +7,7 @@ beat an AR(1)/random-walk baseline unless real next-day skill exists."""
 from garmin_nof1.models.prediction import (
     PredictionResult,
     build_supervised,
+    embargo_from_residual_acf,
     evaluate_prediction,
     holdout_split,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "RecoveryCostFit",
     "RecoveryTauFit",
     "build_supervised",
+    "embargo_from_residual_acf",
     "evaluate_prediction",
     "fit_recovery_cost",
     "fit_recovery_tau",

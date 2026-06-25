@@ -1,8 +1,8 @@
 # Pre-registration — A single-subject (N-of-1) study of cross-sport recovery
 
 **Author:** Ewan Wu
-**Date:** _(to be timestamped on OSF before any outcome-relationship modeling)_
-**Status:** Draft. Will be frozen at a named git commit and submitted to OSF **before** the sport×load → HRV relationship is estimated on real data.
+**Date:** Plan written before real-data modeling; never OSF-timestamped (see Status).
+**Status:** §1–§12 are the analysis plan as written; §13 is the honest, **append-only** record of what actually happened. The plan was **not** OSF-frozen before fitting — the A-layer was fit exploratorily on the full real panel (fully disclosed in §13/A3), while the prediction layer (H-P1) kept its holdout discipline. Treat this as a *pre-registration-style analysis plan on pre-existing data* (§1), not a prospectively frozen registration. §12's "freeze at a named commit on submission" describes the original intent, superseded by §13/A3.
 
 ---
 
@@ -11,8 +11,8 @@
 This is an **observational, non-randomized, single-subject (N-of-1)** study using one
 person's own wearable data. It is **not** a randomized N-of-1 trial.
 
-**The data already exist** (~2 years of the author's Garmin Forerunner 955 records; ~3
-months of chest-strap beat-to-beat RR). This is therefore a pre-registration of an
+**The data already exist** (~2.5 years / 904 days of the author's Garmin Forerunner 955
+records; ~3 months of chest-strap beat-to-beat RR). This is therefore a pre-registration of an
 *analysis plan on pre-existing data*, which provides weaker inferential protection than
 prospective registration. We mitigate this honestly rather than hide it:
 
@@ -46,7 +46,8 @@ predict beyond an autoregressive baseline; we treat that as the honest prior.
 
 - **Primary outcome** — nightly `ln(RMSSD)` from Garmin HRV Status. Modeled in **deviation
   form**: residual after subtracting a centered 28-day rolling baseline (detrending is
-  mandatory; the raw series is trend-dominated — see the ESS demo).
+  mandatory; the raw series is trend-dominated — see the ESS demo in
+  `examples/demo_cv_leakage.py`).
 - **Exposure** — per-session `TRIMP` (primary variant pre-declared: HR-based Banister TRIMP;
   robustness across Edwards and Garmin training-load variants). **Sport label** ∈
   {`triathlon` (endurance: swim/bike/run), `soccer` (intermittent), `rest`}.
@@ -196,10 +197,15 @@ the maximum observed activity HR (corroborated by several near-maximal soccer se
 than a single spike). The specific values live in the local analysis config and are not
 committed (personal-data policy); the derivation rule above makes them reproducible.
 
+*(A5 and A6 are both dated 2026-06-22; A6 appears above A5 below because its ID was assigned
+first during the working session. Append-only means content is never rewritten — not that the
+display order is frozen.)*
+
 **A6 — Prediction layer (H-P1): candidate simplified to an OLS linear model (2026-06-22).**
 §5 listed the candidate predictor as "state-space/Kalman + gradient-boosting (lagged
-features)". With an effective sample size of only ≈130 independent days (reported next to the
-result), a high-variance learner would overfit; the hypothesis is specifically whether
+features)". With an effective sample size of only ≈130 independent days (later corrected by A8
+to ≈324 on the detrended residual — still modest; OLS remains the right call), a high-variance
+learner would overfit; the hypothesis is specifically whether
 *cross-sport load* adds next-day skill, so the candidate is an OLS linear model = the AR(1)
 baseline **plus** today's per-sport TRIMP loads. Baselines (random-walk, AR(1)), the
 leakage-safe CPCV evaluation, the embargo (sized from the AR(1)-residual ACF), the 20%
@@ -278,3 +284,18 @@ contributing session (nonzero load column), matching the docstring under `load_l
 initial-positive-*sequence*). (v) Documented the known mixed-sport-day limitation: the panel
 stores one label + whole-day TRIMP, so on ~3% of active days a co-occurring sport's load is
 attributed to the dominant sport. None of these change a scientific conclusion.
+
+**A11 — Status of the §9 sensitivity suite (2026-06-24).**
+§9 pre-specified a confounder DAG, a negative-control outcome, an E-value, and a tipping-point
+analysis. Their status:
+- **Negative-control outcome — DONE and reported.** With sleep duration as the outcome, the
+  sport×TRIMP interaction is null (posterior interaction ≈ −0.09, 95% CrI (−0.35, +0.16),
+  straddles 0; the estimator supports `outcome="sleep_hours"`). A generic "hard day" effect is
+  therefore not masquerading as a sport-specific recovery cost. Reported in the README A-section.
+- **Confounder enumeration — DONE narratively** (§9 measured-vs-unmeasured list; README "Honest
+  constraints"); a formal drawn DAG is **deferred/optional**.
+- **E-value and tipping-point — deferred/optional** (mirroring A6's "optional robustness runs").
+  Reason: H-A1 and H-P1 are nulls — there is no positive association whose robustness an E-value
+  would stress-test — and H-A2 did not clear the pre-registered 95% threshold, so it is reported
+  as *suggestive, not supported*; computing an E-value for an effect we explicitly decline to
+  call supported would overstate it. They can be added if H-A2 is ever powered past the bar.

@@ -20,31 +20,13 @@ from __future__ import annotations
 
 import argparse
 
-import numpy as np
-
-from garmin_nof1.models._common import deviation
-from garmin_nof1.models.prediction import evaluate_prediction, holdout_skill, holdout_split
+from garmin_nof1.models.prediction import (
+    embargo_from_residual_acf,
+    evaluate_prediction,
+    holdout_skill,
+    holdout_split,
+)
 from garmin_nof1.pipeline.build_panel import build_daily_panel
-
-
-def _embargo_from_residual_acf(dev_df, *, detrend_window=28, max_embargo=14) -> int:
-    """First lag where the AR(1)-residual autocorrelation falls inside the ~95% white-noise
-    band (|rho| < 2/sqrt(n)); the serial-correlation cooldown to embargo. Floored at 1."""
-    dev = deviation(dev_df, "ln_rmssd", None, detrend_window).to_numpy()
-    dev = dev[np.isfinite(dev)]
-    # AR(1) residual: regress dev[t] on dev[t-1]
-    x, y = dev[:-1], dev[1:]
-    phi = float(np.dot(x - x.mean(), y - y.mean()) / np.dot(x - x.mean(), x - x.mean()))
-    resid = y - (y.mean() + phi * (x - x.mean()))
-    n = resid.size
-    band = 2.0 / np.sqrt(n)
-    rc = resid - resid.mean()
-    var = float(np.dot(rc, rc))
-    for k in range(1, min(max_embargo, n - 1) + 1):
-        ac = float(np.dot(rc[:-k], rc[k:]) / var)
-        if abs(ac) < band:
-            return max(1, k)
-    return max_embargo
 
 
 def main() -> None:
@@ -56,7 +38,7 @@ def main() -> None:
 
     panel = build_daily_panel(args.raw_dir, hr_rest=args.hr_rest, hr_max=args.hr_max)
     dev, hold = holdout_split(panel, frac=0.2)
-    embargo = _embargo_from_residual_acf(dev)
+    embargo = embargo_from_residual_acf(dev)
 
     print("=" * 70)
     print("H-P1 预测层报告(只输出 RMSE/技能数值,不含具体生理读数)")

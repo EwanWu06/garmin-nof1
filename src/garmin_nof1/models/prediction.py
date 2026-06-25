@@ -57,6 +57,32 @@ def holdout_split(df: pd.DataFrame, *, frac: float = 0.2) -> tuple[pd.DataFrame,
     return df.iloc[: len(df) - n_hold].copy(), df.iloc[len(df) - n_hold :].copy()
 
 
+def embargo_from_residual_acf(
+    df: pd.DataFrame, *, outcome: str = "ln_rmssd", detrend_window: int = 28, max_embargo: int = 14
+) -> int:
+    """Embargo (days) sized from the AR(1)-residual autocorrelation of the detrended outcome.
+
+    Detrends ``outcome`` (centered rolling mean), fits a lag-1 AR, and returns the first lag at
+    which the residual autocorrelation falls inside the ~95% white-noise band
+    (``|rho| < 2/sqrt(n)``), floored at 1 — the serial-correlation cooldown a leakage-safe split
+    should embargo. This is the pre-registered way to size the embargo (OSF §5), used by both the
+    report and the figures so they can't drift apart.
+    """
+    dev = deviation(df, outcome, None, detrend_window).to_numpy()
+    dev = dev[np.isfinite(dev)]
+    x, y = dev[:-1], dev[1:]
+    phi = float(np.dot(x - x.mean(), y - y.mean()) / np.dot(x - x.mean(), x - x.mean()))
+    rc = (y - (y.mean() + phi * (x - x.mean())))
+    rc = rc - rc.mean()
+    var = float(np.dot(rc, rc))
+    n = rc.size
+    band = 2.0 / np.sqrt(n)
+    for k in range(1, min(max_embargo, n - 1) + 1):
+        if abs(float(np.dot(rc[:-k], rc[k:]) / var)) < band:
+            return max(1, k)
+    return max_embargo
+
+
 def build_supervised(df: pd.DataFrame, *, outcome: str = "ln_rmssd") -> pd.DataFrame:
     """Build the one-step-ahead supervised table from a contiguous daily panel.
 

@@ -1,9 +1,18 @@
 # Garmin dual-sport N-of-1
 
+[![tests](https://github.com/EwanWu06/garmin-nof1/actions/workflows/tests.yml/badge.svg)](https://github.com/EwanWu06/garmin-nof1/actions/workflows/tests.yml)
+· MIT licensed · 134 tests on synthetic ground truth (no private data needed)
+
 A single-subject (N-of-1) study of **cross-sport recovery** built from ~2.5 years of one
 athlete's Garmin (Forerunner 955) data spanning two physiologically opposite sports —
 **endurance triathlon** and **intermittent-sprint soccer** — with **strength training** as a
 third modeled load.
+
+**What this demonstrates (methods):** leakage-safe time-series cross-validation (purged
+walk-forward + CPCV, with a leakage-injection test) · within-person Bayesian inference
+(closed-form posteriors, ROPE, credible intervals) · pre-registration with an append-only
+amendment log · an adversarial multi-agent self-audit that found and fixed a real bug ·
+a reproducible, tested toolchain (134 tests, runs with no private data).
 
 The point of this project is *not* "I discovered X." It is: **use quantitative methods to
 honestly characterize one complex individual system, and state clearly where the conclusions
@@ -11,15 +20,17 @@ stop.** Rigor, honest boundaries, a pre-registered analysis with an append-only 
 and a validated, reproducible toolchain are the deliverables. Two of the three headline tests
 land on a **null** — and that is reported as the finding, not hidden.
 
-> **TL;DR of the science.** On this person: (D) the RR→HRV reconstruction is verified
-> self-consistent with the firmware and the strap signal's quality is audited (motion artifact
-> inflates raw RMSSD ~3× in field sport); (A) soccer does **not** cost more next-day vagal HRV
-> *per unit of training load* than triathlon (**null**), but its recovery time-constant is ~2×
-> longer (strong, not decisive at the 95% bar); (P) cross-sport load adds **no** robust next-day
-> HRV prediction over an AR(1) baseline (**null**, as pre-registered).
->
-> The published numbers survived an adversarial multi-agent correctness audit (one real bug —
-> TRIMP double-counting from overlapping archives — found and fixed; details in prereg A7–A10).
+> **Start here:** `python examples/demo_cv_leakage.py` — a 30-second runnable proof that the
+> leakage-safe CV blocks the optimism ordinary k-fold injects. Plain-language overview (中文):
+> [docs/项目简介.md](docs/项目简介.md).
+
+> **TL;DR.** On this one athlete: soccer and triathlon tax next-day recovery *equally per unit
+> of training load* (**null**), but soccer takes **~2× longer to recover from** (strong, not
+> decisive at the 95% bar); and knowing today's training adds **no** useful prediction of
+> tomorrow's recovery (**null**, as pre-registered). A measurement layer audits the signal
+> quality behind those claims (motion artifact inflates raw activity RMSSD ~3×). **Two of three
+> headline tests are nulls — reported, not hidden** — and the numbers survived an adversarial
+> multi-agent self-audit that found and fixed a real bug (prereg A7–A10).
 
 ## The three layers
 
@@ -32,35 +43,41 @@ land on a **null** — and that is reported as the finding, not hidden.
 
 ## Results
 
-### D — Measurement validation (chest-strap window, 22 RR-bearing sessions)
+### D — Measurement: RR reconstruction self-consistency + RR quality audit (chest-strap window, 22 RR-bearing sessions)
 - **RR parsing is self-consistent.** Our `60000/mean(RR)` vs Garmin's firmware `avg_heart_rate`
   agree to ~1 bpm (bias −1.2, ICC 0.99, MAPE 0.93%) — but both come from the *same* chest-strap
   beat stream, so this is a parse/concatenation **self-consistency check** (it catches gross
   parser bugs), **not** independent device agreement. We don't claim it as a sensor validation.
 - **Quality audit (the substantive D-layer result).** Artifact correction removes **~19 ms** of
   motion-inflated RMSSD (raw ~3× the corrected value); soccer
-  (2.7% artifact beats) is noisier than running (1.9%) — field sport HRV needs aggressive
-  cleaning, which is *why* the study uses Garmin's clean overnight HRV for the daily panel.
+  (2.6% artifact beats, n=17) is noisier than running (1.8%, n=5) — field sport HRV needs
+  aggressive cleaning, which is *why* the study uses Garmin's clean overnight HRV for the panel.
 - **Honest scope.** When a chest strap is paired the watch logs it as the *sole* HR source,
   so the FITs carry **no independent wrist-optical series** — a simultaneous wrist-vs-chest
   *device* comparison is not supported and is **not claimed** (demoted; see prereg A5).
 
 ![D-layer RR quality: raw vs artifact-corrected RMSSD by sport](docs/figures/d_layer_quality.png)
+*Raw activity RMSSD runs ~3× the artifact-corrected value; field sport (soccer) is noisier than steady-state (running). The substantive D-layer finding — why the daily panel uses clean overnight HRV.*
 
 ### A — Differential recovery (904-day panel; triathlon 114 / soccer 48 / strength 90)
 - **H-A1 (cost): null.** Next-night ln-RMSSD cost per 100 TRIMP is ~0.04 for all three sports —
   triathlon and soccer essentially identical — so the soccer−triathlon interaction is ≈0
-  (P 0.50). Per unit of *HR-based* load, the sports tax vagal recovery equally. (Caveat: TRIMP
-  underestimates soccer's intermittent sprint load, so "equal per TRIMP" ≠ "equal per session.")
+  (posterior P(interaction>0)≈0.50, a coin-flip → no directional effect). Per unit of *HR-based*
+  load, the sports tax vagal recovery equally. (Caveat: TRIMP underestimates soccer's
+  intermittent sprint load, so "equal per TRIMP" ≠ "equal per session.")
 - **H-A2 (recovery speed): suggestive.** Recovery time-constant τ: **triathlon 0.40 d,
   soccer 0.77 d, strength 0.88 d**. Soccer recovers ~2× slower than triathlon
-  (P(soccer slower) ≈ 0.97), but the 95% credible interval grazes 0 — **not decisive** at the
-  pre-registered threshold; soccer's 48 sessions are the power bottleneck.
+  (posterior P(soccer slower)≈0.97), but the 95% credible interval grazes 0 — **not decisive**
+  at the pre-registered threshold; soccer's 48 sessions are the power bottleneck.
 - **Strength matters.** Modeling strength as its own load (not folding it into "rest") both
   keeps the headline contrast clean and shows strength carries the longest recovery cost — a
   signal that would vanish if it were lumped into the baseline.
+- **Negative control passes.** The pre-registered negative control (OSF §4) — sleep duration as
+  the outcome — shows **no** sport×TRIMP interaction (95% CrI (−0.35, +0.16) straddles 0),
+  i.e. a generic "hard day" effect is not masquerading as a sport-specific recovery cost.
 
 ![A-layer: H-A1 recovery cost (null) and H-A2 recovery τ by sport, with 95% intervals](docs/figures/a_layer.png)
+*H-A1: per-100-TRIMP cost is the same across sports (posterior P(interaction>0)≈0.50, null). H-A2: recovery τ is ~2× longer for soccer (posterior P(soccer slower)≈0.97), 95% credible interval grazes 0. Bars = 95% credible intervals.*
 
 ### P — Prediction (demoted falsification)
 - Predicting next-day ln-RMSSD: random-walk RMSE 0.168, **AR(1) 0.140** (persistence is
@@ -70,6 +87,7 @@ land on a **null** — and that is reported as the finding, not hidden.
   reported alongside the result.
 
 ![H-P1 prediction: RMSE by model and the CPCV skill-improvement distribution](docs/figures/prediction.png)
+*AR(1) clearly beats random-walk; adding cross-sport load barely moves RMSE. The CPCV skill-improvement distribution straddles 0 (5th percentile < 0) → H-P1 null.*
 
 ## A methodological highlight: HRV timestamp alignment
 
@@ -83,6 +101,7 @@ affects (`load_lag=1`) flips the costs to the physiological sign and matches the
 and it is logged transparently in the pre-registration (amendment A1).
 
 ![Same-night vs next-night HRV deviation by sport — the timestamp-alignment confound](docs/figures/alignment.png)
+*Training days read HIGH the same night (you train when you wake up recovered — reverse causation) but LOW the next night (the real recovery cost). Aligning load to the next night fixes it.*
 
 ## Honest constraints (these shape everything)
 
@@ -142,8 +161,10 @@ scripts/
   dlayer_report.py       # D-layer reconstruction validation + RR quality audit
   prediction_report.py   # H-P1 holdout-safe skill report
   make_figures.py        # regenerate the README figures (privacy-safe aggregates)
+examples/
+  demo_cv_leakage.py     # runnable proof: leakage optimism + ESS << nominal day count
 docs/figures/            # committed README figures (aggregate effect estimates only)
-tests/                   # pytest, 133 tests — incl. leakage-injection + estimator recovery
+tests/                   # pytest, 134 tests — incl. leakage-injection + estimator recovery
 data/                    # gitignored: raw FIT/JSON archive + derived panel (never committed)
 preregistration/         # OSF pre-registration + append-only amendment log
 ```
@@ -154,7 +175,7 @@ preregistration/         # OSF pre-registration + append-only amendment log
 mamba env create -f environment.yml     # or: conda env create -f environment.yml
 conda activate garmin-nof1
 pip install -e .
-pytest                                  # 133 tests, all on synthetic data — no private data needed
+pytest                                  # 134 tests, all on synthetic data — no private data needed
 ```
 
 Everything that gates a conclusion (the leakage-safe CV, the estimators, the agreement stats)
@@ -190,6 +211,12 @@ prereg A4.
 ## Status
 
 **Complete.** All three layers are built, validated on synthetic ground truth, and run on the
-real combined panel; 133 tests pass. The scientific story is two honest nulls (H-A1, H-P1), one
-strong-but-not-decisive effect (H-A2: soccer recovers slower), and a clean measurement
-validation (D) — with every analytical decision logged in the pre-registration.
+real combined panel; 134 tests pass. The scientific story is two honest nulls (H-A1, H-P1), one
+strong-but-not-decisive effect (H-A2: soccer recovers slower), and a measurement-pipeline
+self-consistency check + RR quality audit (D) — with every analytical decision logged in the
+pre-registration.
+
+## Author
+
+Ewan Wu — [github.com/EwanWu06](https://github.com/EwanWu06) · wuyouyou2017@gmail.com
+A single-subject portfolio project for biostatistics / computational-biology graduate applications.
