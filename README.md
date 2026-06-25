@@ -220,3 +220,13 @@ pre-registration.
 
 Ewan Wu — [github.com/EwanWu06](https://github.com/EwanWu06) · wuyouyou2017@gmail.com
 A single-subject portfolio project for biostatistics / computational-biology graduate applications.
+
+## Notes on tooling
+
+Built with an AI-assisted workflow (Claude Code — see `CLAUDE.md` and the `Co-authored-by`
+commit trailers). I set the goals and constraints, made the key modeling and scope calls
+(e.g. modeling strength training as its own load type; running the analysis on my own real
+data; commissioning the correctness audit), and required the work to be pre-registered and
+reported honestly, nulls included; the assistant proposed methods and wrote the implementation
+under that direction. Directing and auditing a capable AI toward a trustworthy,
+honestly-reported result is itself a skill this project reflects.
