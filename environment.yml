@@ -1,0 +1,25 @@
+# Reproducible environment for the Garmin dual-sport N-of-1 project.
+#
+#   mamba env create -f environment.yml      (or: conda env create -f environment.yml)
+#   conda activate garmin-nof1
+name: garmin-nof1
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - statsmodels
+  - matplotlib
+  - pyarrow            # parquet I/O for the daily panel
+  - pytest
+  - pytest-cov
+  - ruff               # lint/format
+  - pip
+  - pip:
+      - fitparse        # parse activity FIT files (chest-strap RR / hrv messages)
+      - garminconnect   # unofficial Garmin Connect private-API client (daily panel)
+      - garth           # Garmin SSO/auth backend used by garminconnect (login + MFA + token store)
+      - curl_cffi       # TLS-fingerprint session for Garmin auth (Cloudflare/429)

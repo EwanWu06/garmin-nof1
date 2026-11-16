@@ -1,0 +1,261 @@
+"""Assemble archived Garmin exports into a tidy, missingness-aware daily panel.
+
+The output schema is **identical to the synthetic panel** (`garmin_nof1.data.synthetic`)
+— `date, sport, trimp, sleep_hours, rhr, ln_rmssd, hrv_observed` — so real data is a
+drop-in for the already-validated Layer-A models. Days with no record are filled as
+contiguous rest days with NaN HRV (non-wear), so the calendar has no holes.
+
+The raw-dict -> record extractors carry an *assumed* Garmin Connect schema (documented
+inline in ``garmin_schema``). Everything here is pure (operates on dicts/DataFrames)
+and tested on synthetic fixtures.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterable
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from garmin_nof1.pipeline.garmin_schema import (
+    activity_to_session,
+    extract_hrv,
+    extract_rhr,
+    extract_sleep,
+)
+from garmin_nof1.pipeline.trimp import banister_trimp
+
+SCHEMA_COLUMNS = ["date", "sport", "trimp", "sleep_hours", "rhr", "ln_rmssd", "hrv_observed"]
+_SPORT_CATEGORIES = ["rest", "triathlon", "soccer", "strength"]
+
+
+def ln_rmssd_from_rmssd(rmssd_value) -> float:
+    """ln(RMSSD), or NaN for missing/non-positive input (non-wear nights)."""
+    if rmssd_value is None or rmssd_value <= 0:
+        return float("nan")
+    return float(np.log(rmssd_value))
+
+
+def assemble_panel(records: Iterable[dict], *, start=None, end=None) -> pd.DataFrame:
+    """Build the tidy daily panel from per-day records on a CONTIGUOUS date range.
+
+    Each record is a dict with keys ``date`` and any of ``sport, trimp, sleep_hours,
+    rhr, ln_rmssd`` (missing -> NaN). Missing days become rest days with zero load and
+    NaN HRV; ``hrv_observed`` flags ln_rmssd presence.
+    """
+    df = pd.DataFrame(list(records))
+    if df.empty:
+        raise ValueError("assemble_panel received no records; provide at least one day.")
+    df["date"] = pd.to_datetime(df["date"])
+    if df["date"].duplicated().any():
+        first_dup = df.loc[df["date"].duplicated(), "date"].iloc[0].date()
+        raise ValueError(
+            f"assemble_panel received duplicate dates (first: {first_dup}); "
+            "deduplicate before calling."
+        )
+    lo = df["date"].min() if start is None else pd.Timestamp(start)
+    hi = df["date"].max() if end is None else pd.Timestamp(end)
+    full = pd.date_range(lo, hi, freq="D")
+
+    df = df.set_index("date").reindex(full)
+    df.index.name = "date"
+    df = df.reset_index()
+
+    for col in ["trimp", "sleep_hours", "rhr", "ln_rmssd"]:
+        if col not in df.columns:
+            df[col] = np.nan
+    df["sport"] = df["sport"].fillna("rest") if "sport" in df.columns else "rest"
+    df["trimp"] = df["trimp"].fillna(0.0)
+    # Any sport value not in _SPORT_CATEGORIES is coerced to NaN by Categorical;
+    # in normal flow only modeled sports reach here (map_sport guarantees it).
+    df["sport"] = pd.Categorical(df["sport"], categories=_SPORT_CATEGORIES)
+    df["hrv_observed"] = df["ln_rmssd"].notna()
+    return df[SCHEMA_COLUMNS]
+
+
+# Garmin activityType.typeKey -> modeled sport. Endurance triathlon disciplines (incl.
+# multisport races/bricks) collapse to "triathlon"; soccer/football to "soccer". Strength
+# training is its own modeled load type ("strength") — deliberately NOT folded into "rest",
+# because it carries real autonomic load and would otherwise contaminate the recovery-cost
+# baseline. Low-intensity, non-training movement (walking, hiking, ...) stays unmapped and
+# is treated as "rest" (a true low-load day) for the panel label.
+_SPORT_MAP = {
+    "running": "triathlon",
+    "track_running": "triathlon",
+    "trail_running": "triathlon",
+    "treadmill_running": "triathlon",
+    "cycling": "triathlon",
+    "road_biking": "triathlon",
+    "indoor_cycling": "triathlon",
+    "mountain_biking": "triathlon",
+    "virtual_ride": "triathlon",
+    "swimming": "triathlon",
+    "lap_swimming": "triathlon",
+    "open_water_swimming": "triathlon",
+    "multi_sport": "triathlon",
+    "soccer": "soccer",
+    "football": "soccer",
+    "strength_training": "strength",
+}
+
+
+def map_sport(activity_type_key) -> str:
+    """Map a Garmin activityType key to {triathlon, soccer, rest}.
+
+    Keys are lowercased before lookup so mixed-case export values (e.g. "Running",
+    "SOCCER") are tolerated. Anything not found in the map is treated as an unmodeled
+    session ("rest") that contributes no label priority or TRIMP load.
+    """
+    return _SPORT_MAP.get(str(activity_type_key).lower(), "rest")
+
+
+def daily_sport_and_trimp(
+    activities: Iterable[dict], hr_rest: float, hr_max: float, sex: str = "M"
+) -> dict[str, dict]:
+    """Fold per-activity summaries into per-day ``{date: {"sport", "trimp"}}``.
+
+    The day's label is the highest-priority modeled sport present (soccer > triathlon >
+    strength > rest); ``trimp`` sums Banister TRIMP over the day's modeled (triathlon/
+    soccer/strength) sessions. Each activity dict needs ``date, sport_key, hr_avg,
+    duration_min``.
+
+    TRIMP is summed across ALL modeled sessions regardless of which sport wins the label
+    (a mixed day — e.g. run + strength, or run + soccer — contributes load from both).
+    The priority puts the endurance/team session above strength, so a "lift + ride" day
+    is labelled triathlon (its dominant stimulus) while a strength-only day is labelled
+    strength rather than disappearing into the rest baseline.
+    """
+    priority = {"rest": 0, "strength": 1, "triathlon": 2, "soccer": 3}
+    out: dict[str, dict] = {}
+    for act in activities:
+        date = str(act["date"])
+        sport = map_sport(act["sport_key"])
+        day = out.setdefault(date, {"sport": "rest", "trimp": 0.0})
+        if priority[sport] > priority[day["sport"]]:
+            day["sport"] = sport
+        if sport != "rest":
+            day["trimp"] += banister_trimp(act["duration_min"], act["hr_avg"], hr_rest, hr_max, sex)
+    return out
+
+
+def classify_missingness(df: pd.DataFrame, *, columns=("ln_rmssd", "rhr")) -> pd.DataFrame:
+    """Annotate non-wear / missing days: add ``<col>_missing`` booleans and a
+    ``missing_any`` flag. Labeling only — the MCAR-vs-MAR probe is separate."""
+    out = df.copy()
+    for c in columns:
+        out[f"{c}_missing"] = out[c].isna()
+    flags = [f"{c}_missing" for c in columns]
+    out["missing_any"] = out[flags].any(axis=1)
+    return out
+
+
+def missingness_diagnostic(df: pd.DataFrame, *, predictor="trimp", target="ln_rmssd") -> dict:
+    """Crude MCAR probe: does ``target`` missingness depend on ``predictor``?
+
+    Compares the predictor's mean on missing vs present days and flags
+    ``suspect_mar`` when the gap exceeds ``0.5 × std(predictor)`` computed
+    over **all rows** — an arbitrary heuristic, not a formal statistical test
+    and not calibrated to sample size.
+
+    NaN values in the predictor column are excluded from group means (pandas
+    ``skipna`` default behaviour).
+
+    Raises ``KeyError`` if ``predictor`` or ``target`` is absent from ``df``.
+
+    A positive flag means the pattern *warrants investigation* before any
+    imputation decision — it does not prove the data are MAR.
+    """
+    miss = df[target].isna()
+    if miss.sum() == 0 or (~miss).sum() == 0:
+        return {
+            "mean_when_missing": float("nan"),
+            "mean_when_present": float("nan"),
+            "suspect_mar": False,
+        }
+    a = float(df.loc[miss, predictor].mean())
+    b = float(df.loc[~miss, predictor].mean())
+    if np.isnan(a) or np.isnan(b):
+        return {"mean_when_missing": a, "mean_when_present": b, "suspect_mar": False}
+    return {
+        "mean_when_missing": a,
+        "mean_when_present": b,
+        "suspect_mar": bool(abs(a - b) > 0.5 * df[predictor].std()),
+    }
+
+
+def _load_json_archives(raw_dir: Path, prefix: str) -> list:
+    """Load every archived ``<prefix>-*.json`` in ``raw_dir`` (sorted by filename)."""
+    return [json.loads(p.read_text()) for p in sorted(Path(raw_dir).glob(f"{prefix}-*.json"))]
+
+
+def build_daily_panel(
+    raw_dir: Path | str | list, *, hr_rest: float, hr_max: float, sex: str = "M"
+) -> pd.DataFrame:
+    """Assemble a tidy daily panel from archived Garmin Connect JSON.
+
+    ``raw_dir`` is one archive directory, or a **list** of directories (e.g. one per Garmin
+    account — ``["data/raw", "data/raw_cn"]`` — whose date ranges don't overlap). Reads the
+    per-day ``hrv``/``sleep``/``rhr`` summaries and the ``activities`` list from every given
+    directory, runs the assumed-schema adapters (:mod:`garmin_nof1.pipeline.garmin_schema`)
+    and the daily Banister-TRIMP fold, and produces the synthetic-panel schema — a drop-in
+    for the Layer-A models. ``hr_rest`` / ``hr_max`` are the subject's HR bounds for Banister
+    TRIMP.
+
+    The Garmin-response key assumptions live entirely in ``garmin_schema``; reconcile them
+    against your real archives on the first run.
+
+    Daily summaries (hrv/sleep/rhr) are assigned per date, so a date appearing in more than one
+    archive (or directory) is simply overwritten, not accumulated; the later-listed directory
+    wins. Activities, however, come as **overlapping date-range** exports, so the same workout
+    can appear in several files — they are de-duplicated by ``activityId`` (first sighting) before
+    the TRIMP fold, otherwise its load would be summed once per archive.
+
+    Raises:
+        ValueError: if no records are found across the given directories (propagated from
+            :func:`assemble_panel`).
+    """
+    dirs = [raw_dir] if isinstance(raw_dir, (str, Path)) else list(raw_dir)
+    dirs = [Path(d) for d in dirs]
+
+    def _load(prefix: str) -> list:
+        out: list = []
+        for directory in dirs:
+            out.extend(_load_json_archives(directory, prefix))
+        return out
+
+    per_day: dict[str, dict] = {}
+    for resp in _load("hrv"):
+        got = extract_hrv(resp)
+        if got:
+            date, fields = got
+            per_day.setdefault(date, {})["ln_rmssd"] = ln_rmssd_from_rmssd(fields["rmssd"])
+    for prefix, extract in (("sleep", extract_sleep), ("rhr", extract_rhr)):
+        for resp in _load(prefix):
+            got = extract(resp)
+            if got:
+                date, fields = got
+                per_day.setdefault(date, {}).update(fields)
+
+    # De-duplicate by activityId before folding: the archives are date-range exports that
+    # overlap (e.g. activities-2024-01-01_2024-12-31 and activities-2024-06-01_2025-06-30),
+    # so the same physical workout appears in several files and would otherwise have its TRIMP
+    # summed once per archive. Keep first sighting (mirrors ingest_garmin.activity_ids_in_range).
+    sessions = []
+    seen_ids: set = set()
+    for resp in _load("activities"):
+        for act in resp:
+            aid = act.get("activityId")
+            if aid is not None:
+                if aid in seen_ids:
+                    continue
+                seen_ids.add(aid)
+            session = activity_to_session(act)
+            if session:
+                sessions.append(session)
+    for date, sport_trimp in daily_sport_and_trimp(sessions, hr_rest, hr_max, sex).items():
+        per_day.setdefault(date, {}).update(sport_trimp)
+
+    records = [{"date": date, **fields} for date, fields in per_day.items()]
+    return assemble_panel(records)
